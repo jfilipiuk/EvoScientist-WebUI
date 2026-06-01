@@ -24,9 +24,9 @@ export const viewport: Viewport = {
 // Runs before paint so the right theme class is on <html> immediately — no flash
 // of the wrong theme. Mirrors ThemeProvider's resolution (default: follow the
 // system); ThemeProvider takes over once React mounts. Kept inline + minimal.
-const themeScript = `(function(){try{var k=${JSON.stringify(
+const themeScript = `(function(){var k=${JSON.stringify(
   THEME_STORAGE_KEY
-)};var t=localStorage.getItem(k)||"system";var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
+)};var t="system";try{t=localStorage.getItem(k)||"system";}catch(_){}var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.style.colorScheme=d?"dark":"light";})();`;
 
 export default function RootLayout({
   children,
