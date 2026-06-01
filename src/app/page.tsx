@@ -17,6 +17,7 @@ import {
 import { ThreadList } from "@/app/components/ThreadList";
 import { ChatProvider } from "@/providers/ChatProvider";
 import { ChatInterface } from "@/app/components/ChatInterface";
+import { SkillsMarketplace } from "@/app/components/SkillsMarketplace";
 
 interface HomePageInnerProps {
   config: DeploymentConfig;
@@ -34,6 +35,7 @@ function HomePageInner({
   const client = useClient();
   const [, setThreadId] = useQueryState("threadId");
   const [sidebar, setSidebar] = useQueryState("sidebar");
+  const [view, setView] = useQueryState("view");
 
   const [mutateThreads, setMutateThreads] = useState<(() => void) | null>(null);
   const [interruptCount, setInterruptCount] = useState(0);
@@ -153,7 +155,10 @@ function HomePageInner({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => setThreadId(null)}
+                  onClick={() => {
+                    setThreadId(null);
+                    setView(null);
+                  }}
                   aria-label="New chat"
                 >
                   <SquarePen
@@ -191,10 +196,11 @@ function HomePageInner({
                   order={1}
                   defaultSize={25}
                   minSize={20}
-                  className="relative min-w-[380px]"
+                  className="relative min-w-[280px]"
                 >
                   <ThreadList
                     onThreadSelect={async (id) => {
+                      setView(null);
                       await setThreadId(id);
                     }}
                     onMutateReady={(fn) => setMutateThreads(() => fn)}
@@ -210,12 +216,16 @@ function HomePageInner({
               className="relative flex flex-col"
               order={2}
             >
-              <ChatProvider
-                activeAssistant={assistant}
-                onHistoryRevalidate={() => mutateThreads?.()}
-              >
-                <ChatInterface assistant={assistant} />
-              </ChatProvider>
+              {view === "skills" ? (
+                <SkillsMarketplace />
+              ) : (
+                <ChatProvider
+                  activeAssistant={assistant}
+                  onHistoryRevalidate={() => mutateThreads?.()}
+                >
+                  <ChatInterface assistant={assistant} />
+                </ChatProvider>
+              )}
             </ResizablePanel>
           </ResizablePanelGroup>
         </div>

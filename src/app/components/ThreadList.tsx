@@ -2,7 +2,13 @@
 
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
 import { format } from "date-fns";
-import { Loader2, MessageSquare, Search, SquarePen } from "lucide-react";
+import {
+  Loader2,
+  MessageSquare,
+  Puzzle,
+  Search,
+  SquarePen,
+} from "lucide-react";
 import { useQueryState } from "nuqs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -122,6 +128,7 @@ export function ThreadList({
   onInterruptCountChange,
 }: ThreadListProps) {
   const [currentThreadId, setThreadId] = useQueryState("threadId");
+  const [view, setView] = useQueryState("view");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [search, setSearch] = useState("");
 
@@ -216,7 +223,10 @@ export function ThreadList({
     <div className="absolute inset-0 flex flex-col">
       <button
         type="button"
-        onClick={() => setThreadId(null)}
+        onClick={() => {
+          setThreadId(null);
+          setView(null);
+        }}
         className="flex flex-shrink-0 items-center gap-3 border-b border-border p-4 text-left text-sm font-medium transition-colors hover:bg-accent"
       >
         <SquarePen
@@ -224,6 +234,20 @@ export function ThreadList({
           aria-hidden="true"
         />
         New Chat
+      </button>
+      <button
+        type="button"
+        onClick={() => setView("skills")}
+        className={cn(
+          "flex flex-shrink-0 items-center gap-3 border-b border-border p-4 text-left text-sm font-medium transition-colors hover:bg-accent",
+          view === "skills" && "bg-accent"
+        )}
+      >
+        <Puzzle
+          className="size-4"
+          aria-hidden="true"
+        />
+        Skills
       </button>
       <div className="flex-shrink-0 border-b border-border p-3">
         <div className="relative">
