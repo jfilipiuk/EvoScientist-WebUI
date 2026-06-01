@@ -1,7 +1,8 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { NuqsAdapter } from "nuqs/adapters/next/app";
-import { Toaster } from "sonner";
+import { ThemeProvider, ThemedToaster } from "@/providers/ThemeProvider";
+import { THEME_STORAGE_KEY } from "@/lib/theme";
 import "./globals.css";
 
 const inter = Inter({ subsets: ["latin"] });
@@ -13,9 +14,19 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#f9f9f9",
-  colorScheme: "light",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f9f9f9" },
+    { media: "(prefers-color-scheme: dark)", color: "#212121" },
+  ],
+  colorScheme: "light dark",
 };
+
+// Runs before paint so the right theme class is on <html> immediately — no flash
+// of the wrong theme. Mirrors ThemeProvider's resolution (default: follow the
+// system); ThemeProvider takes over once React mounts. Kept inline + minimal.
+const themeScript = `(function(){try{var k=${JSON.stringify(
+  THEME_STORAGE_KEY
+)};var t=localStorage.getItem(k)||"system";var d=t==="dark"||(t!=="light"&&window.matchMedia("(prefers-color-scheme: dark)").matches);var e=document.documentElement;e.classList.toggle("dark",d);e.style.colorScheme=d?"dark":"light";}catch(e){}})();`;
 
 export default function RootLayout({
   children,
@@ -31,8 +42,13 @@ export default function RootLayout({
         className={inter.className}
         suppressHydrationWarning
       >
-        <NuqsAdapter>{children}</NuqsAdapter>
-        <Toaster />
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <NuqsAdapter>
+          <ThemeProvider>
+            {children}
+            <ThemedToaster />
+          </ThemeProvider>
+        </NuqsAdapter>
       </body>
     </html>
   );

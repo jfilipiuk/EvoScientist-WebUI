@@ -18,6 +18,8 @@ import { ThreadList } from "@/app/components/ThreadList";
 import { ChatProvider } from "@/providers/ChatProvider";
 import { ChatInterface } from "@/app/components/ChatInterface";
 import { SkillsMarketplace } from "@/app/components/SkillsMarketplace";
+import { ThemeToggle } from "@/app/components/ThemeToggle";
+import { BetaBadge } from "@/app/components/BetaBadge";
 
 interface HomePageInnerProps {
   config: DeploymentConfig;
@@ -151,6 +153,7 @@ function HomePageInner({
                 priority
               />
               <h1 className="text-xl font-semibold">EvoScientist</h1>
+              <BetaBadge />
             </div>
             <div className="flex items-center gap-0.5">
               <Button
@@ -193,6 +196,7 @@ function HomePageInner({
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <ThemeToggle />
             <Button
               variant="outline"
               size="sm"
