@@ -18,6 +18,7 @@ import {
   Circle,
   FileIcon,
   ShieldCheck,
+  Sparkles,
   TriangleAlert,
 } from "lucide-react";
 import { ChatMessage } from "@/app/components/ChatMessage";
@@ -35,6 +36,7 @@ import { Assistant, Message } from "@langchain/langgraph-sdk";
 import { extractStringFromMessageContent } from "@/app/utils/utils";
 import { useChatContext } from "@/providers/ChatProvider";
 import { cn } from "@/lib/utils";
+import { formatModel } from "@/lib/model";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { FilesPopover } from "@/app/components/TasksFilesSidebar";
 import {
@@ -111,6 +113,20 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
     stopStream,
     resumeInterrupt,
   } = useChatContext();
+
+  // The model behind the latest assistant reply (read from message metadata).
+  // Token/context usage is intentionally NOT shown — the backend doesn't persist
+  // usage_metadata, so it isn't reliably available here.
+  const currentModel = useMemo(() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.type !== "ai") continue;
+      const rm = m.response_metadata as Record<string, unknown> | undefined;
+      const info = formatModel(rm?.model_name ?? rm?.model, rm?.model_provider);
+      if (info) return info;
+    }
+    return null;
+  }, [messages]);
 
   // While the agent waits on an *actionable* interrupt (approval or ask_user),
   // lock the composer so the user answers via the in-message controls — a free
@@ -729,6 +745,18 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
               >
                 Turn Off
               </button>
+            </div>
+          )}
+          {currentModel && (
+            <div className="flex items-center gap-1.5 border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
+              <Sparkles
+                className="size-3.5 shrink-0 text-[var(--brand)]"
+                aria-hidden="true"
+              />
+              <span className="font-medium text-foreground">
+                {currentModel.name}
+              </span>
+              {currentModel.provider && <span>· {currentModel.provider}</span>}
             </div>
           )}
           <form
