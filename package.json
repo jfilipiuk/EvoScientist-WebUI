@@ -1,17 +1,41 @@
 {
-  "name": "evoscientist-webui",
-  "version": "0.1.0",
+  "name": "@evoscientist/webui",
+  "version": "0.0.1",
   "description": "Web UI for EvoScientist — a self-evolving AI scientist built on DeepAgents/LangGraph.",
-  "private": true,
   "type": "module",
+  "license": "Apache-2.0",
+  "keywords": [
+    "evoscientist",
+    "ai-scientist",
+    "research",
+    "deepagents",
+    "langgraph",
+    "chat-ui",
+    "webui"
+  ],
+  "bin": {
+    "evoscientist-webui": "./bin/evoscientist-webui.mjs"
+  },
+  "files": [
+    "bin/",
+    "dist/"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "dev": "next dev --turbopack --port 4716",
-    "build": "next build",
+    "build": "next build && node scripts/assemble-standalone.mjs",
     "start": "next start --port 4716",
+    "start:dist": "node dist/server.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "prepack": "npm run build"
   },
   "dependencies": {
     "@langchain/core": "1.1.19",
