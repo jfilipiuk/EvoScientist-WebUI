@@ -3,13 +3,6 @@
 @tailwind utilities;
 
 @layer base {
-  /* Remove default focus box-shadows */
-  input:focus,
-  textarea:focus,
-  select:focus {
-    box-shadow: none !important;
-  }
-
   /* Set default outline color to match brand instead of browser blue */
   * {
     outline-color: hsl(var(--primary));
@@ -195,10 +188,26 @@
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
+}
+
+button,
+a {
+  touch-action: manipulation;
 }
 
 html,

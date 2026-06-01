@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import { format } from "date-fns";
 import {
   Loader2,
   MessageSquare,
   Puzzle,
   Search,
   SquarePen,
+  X,
 } from "lucide-react";
 import { useQueryState } from "nuqs";
 import { Button } from "@/components/ui/button";
@@ -44,6 +44,13 @@ const STATUS_COLORS: Record<ThreadItem["status"], string> = {
   error: "bg-red-600",
 };
 
+const STATUS_LABELS: Record<ThreadItem["status"], string> = {
+  idle: "Idle",
+  busy: "Busy",
+  interrupted: "Interrupted",
+  error: "Error",
+};
+
 function getThreadColor(status: ThreadItem["status"]): string {
   return STATUS_COLORS[status] ?? "bg-gray-400";
 }
@@ -52,10 +59,24 @@ function formatTime(date: Date, now = new Date()): string {
   const diff = now.getTime() - date.getTime();
   const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-  if (days === 0) return format(date, "HH:mm");
+  if (days === 0) {
+    // Pin 24-hour time (h23) so the clock stays consistent regardless of the
+    // browser locale (e.g. en-US would otherwise render "06:55 PM"). The
+    // weekday/date below intentionally stay locale-aware.
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      hourCycle: "h23",
+    }).format(date);
+  }
   if (days === 1) return "Yesterday";
-  if (days < 7) return format(date, "EEEE");
-  return format(date, "MM/dd");
+  if (days < 7) {
+    return new Intl.DateTimeFormat(undefined, { weekday: "long" }).format(date);
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+  }).format(date);
 }
 
 function StatusFilterItem({
@@ -118,12 +139,16 @@ function EmptyState() {
 
 interface ThreadListProps {
   onThreadSelect: (id: string) => void;
+  onClose?: () => void;
+  onNewChat?: () => void;
   onMutateReady?: (mutate: () => void) => void;
   onInterruptCountChange?: (count: number) => void;
 }
 
 export function ThreadList({
   onThreadSelect,
+  onClose,
+  onNewChat,
   onMutateReady,
   onInterruptCountChange,
 }: ThreadListProps) {
@@ -224,8 +249,13 @@ export function ThreadList({
       <button
         type="button"
         onClick={() => {
-          setThreadId(null);
-          setView(null);
+          if (onNewChat) {
+            onNewChat();
+          } else {
+            setThreadId(null);
+            setView(null);
+          }
+          onClose?.();
         }}
         className="flex flex-shrink-0 items-center gap-3 border-b border-border p-4 text-left text-sm font-medium transition-colors hover:bg-accent"
       >
@@ -237,7 +267,10 @@ export function ThreadList({
       </button>
       <button
         type="button"
-        onClick={() => setView("skills")}
+        onClick={() => {
+          setView("skills");
+          onClose?.();
+        }}
         className={cn(
           "flex flex-shrink-0 items-center gap-3 border-b border-border p-4 text-left text-sm font-medium transition-colors hover:bg-accent",
           view === "skills" && "bg-accent"
@@ -247,25 +280,42 @@ export function ThreadList({
           className="size-4"
           aria-hidden="true"
         />
-        Skills
+        Research Skills
       </button>
-      <div className="flex-shrink-0 border-b border-border p-3">
-        <div className="relative">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
-            aria-hidden="true"
-          />
-          <input
-            type="search"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search research…"
-            aria-label="Search research"
-            spellCheck={false}
-            className="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
-          />
+      {view !== "skills" && (
+        <div className="flex-shrink-0 border-b border-border p-3">
+          <div className="relative">
+            <Search
+              className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground"
+              aria-hidden="true"
+            />
+            <input
+              type="search"
+              name="research-search"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Search research…"
+              aria-label="Search research"
+              autoComplete="off"
+              spellCheck={false}
+              className="w-full rounded-md border border-border bg-background py-1.5 pl-8 pr-8 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            />
+            {search && (
+              <button
+                type="button"
+                aria-label="Clear research search"
+                onClick={() => setSearch("")}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <X
+                  className="size-3.5"
+                  aria-hidden="true"
+                />
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
       {/* Header with title and status filter */}
       <div className="grid flex-shrink-0 grid-cols-[1fr_auto] items-center gap-3 border-b border-border p-4">
         <h2 className="text-lg font-semibold tracking-tight">Research</h2>
@@ -314,6 +364,19 @@ export function ThreadList({
               </SelectGroup>
             </SelectContent>
           </Select>
+          {onClose && (
+            <button
+              type="button"
+              aria-label="Close research"
+              onClick={onClose}
+              className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X
+                className="size-4"
+                aria-hidden="true"
+              />
+            </button>
+          )}
         </div>
       </div>
 
@@ -374,7 +437,7 @@ export function ThreadList({
                             <h3 className="truncate text-sm font-semibold">
                               {thread.title}
                             </h3>
-                            <span className="ml-2 flex-shrink-0 text-xs text-muted-foreground">
+                            <span className="ml-2 flex-shrink-0 text-xs tabular-nums text-muted-foreground">
                               {formatTime(thread.updatedAt)}
                             </span>
                           </div>
@@ -384,7 +447,14 @@ export function ThreadList({
                               {thread.description}
                             </p>
                             <div className="ml-2 flex-shrink-0">
-                              <div
+                              <span
+                                role="img"
+                                aria-label={`Status: ${
+                                  STATUS_LABELS[thread.status]
+                                }`}
+                                title={`Status: ${
+                                  STATUS_LABELS[thread.status]
+                                }`}
                                 className={cn(
                                   "h-2 w-2 rounded-full",
                                   getThreadColor(thread.status)
@@ -411,7 +481,7 @@ export function ThreadList({
                   {isLoadingMore ? (
                     <>
                       <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                      Loading...
+                      Loading…
                     </>
                   ) : (
                     "Load More"

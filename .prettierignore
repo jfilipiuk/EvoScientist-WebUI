@@ -17,6 +17,7 @@ out
 
 # production
 build
+dist
 
 # vercel
 .vercel

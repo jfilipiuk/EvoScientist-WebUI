@@ -40,6 +40,8 @@ function HomePageInner({
   const [mutateThreads, setMutateThreads] = useState<(() => void) | null>(null);
   const [interruptCount, setInterruptCount] = useState(0);
   const [assistant, setAssistant] = useState<Assistant | null>(null);
+  const [isDesktopLayout, setIsDesktopLayout] = useState<boolean | null>(null);
+  const [chatSessionRevision, setChatSessionRevision] = useState(0);
 
   const fetchAssistant = useCallback(async () => {
     const isUUID =
@@ -105,6 +107,30 @@ function HomePageInner({
     fetchAssistant();
   }, [fetchAssistant]);
 
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 768px)");
+    const updateLayout = () => setIsDesktopLayout(mediaQuery.matches);
+
+    updateLayout();
+    mediaQuery.addEventListener("change", updateLayout);
+    return () => mediaQuery.removeEventListener("change", updateLayout);
+  }, []);
+
+  const closeSidebar = useCallback(() => setSidebar(null), [setSidebar]);
+  const startNewChat = useCallback(() => {
+    setThreadId(null);
+    setView(null);
+    setChatSessionRevision((revision) => revision + 1);
+  }, [setThreadId, setView]);
+  const selectThread = useCallback(
+    async (id: string) => {
+      setView(null);
+      await setThreadId(id);
+      setChatSessionRevision((revision) => revision + 1);
+    },
+    [setThreadId, setView]
+  );
+
   return (
     <>
       <ConfigDialog
@@ -155,10 +181,7 @@ function HomePageInner({
                 <Button
                   variant="ghost"
                   size="icon"
-                  onClick={() => {
-                    setThreadId(null);
-                    setView(null);
-                  }}
+                  onClick={startNewChat}
                   aria-label="New chat"
                 >
                   <SquarePen
@@ -184,12 +207,37 @@ function HomePageInner({
           </div>
         </header>
 
-        <div className="flex-1 overflow-hidden">
+        <div className="relative flex-1 overflow-hidden">
+          {sidebar && isDesktopLayout === false && (
+            <div className="absolute inset-0 z-40 flex md:hidden">
+              <button
+                type="button"
+                aria-label="Close research"
+                className="absolute inset-0 bg-black/40"
+                onClick={closeSidebar}
+              />
+              <aside
+                aria-label="Research navigation"
+                className="relative z-10 h-full w-[min(20rem,calc(100vw-3rem))] bg-background shadow-xl"
+              >
+                <ThreadList
+                  onClose={closeSidebar}
+                  onNewChat={startNewChat}
+                  onThreadSelect={async (id) => {
+                    await selectThread(id);
+                    closeSidebar();
+                  }}
+                  onMutateReady={(fn) => setMutateThreads(() => fn)}
+                  onInterruptCountChange={setInterruptCount}
+                />
+              </aside>
+            </div>
+          )}
           <ResizablePanelGroup
             direction="horizontal"
             autoSaveId="evoscientist-chat"
           >
-            {sidebar && (
+            {sidebar && isDesktopLayout && (
               <>
                 <ResizablePanel
                   id="thread-history"
@@ -199,10 +247,8 @@ function HomePageInner({
                   className="relative min-w-[280px]"
                 >
                   <ThreadList
-                    onThreadSelect={async (id) => {
-                      setView(null);
-                      await setThreadId(id);
-                    }}
+                    onNewChat={startNewChat}
+                    onThreadSelect={selectThread}
                     onMutateReady={(fn) => setMutateThreads(() => fn)}
                     onInterruptCountChange={setInterruptCount}
                   />
@@ -220,6 +266,7 @@ function HomePageInner({
                 <SkillsMarketplace />
               ) : (
                 <ChatProvider
+                  key={chatSessionRevision}
                   activeAssistant={assistant}
                   onHistoryRevalidate={() => mutateThreads?.()}
                 >
@@ -314,7 +361,7 @@ export default function HomePage() {
     <Suspense
       fallback={
         <div className="flex h-screen items-center justify-center">
-          <p className="text-muted-foreground">Loading...</p>
+          <p className="text-muted-foreground">Loading…</p>
         </div>
       }
     >

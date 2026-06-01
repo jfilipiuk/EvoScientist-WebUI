@@ -18,6 +18,7 @@ import {
   Circle,
   FileIcon,
   ShieldCheck,
+  TriangleAlert,
 } from "lucide-react";
 import { ChatMessage } from "@/app/components/ChatMessage";
 import {
@@ -36,10 +37,25 @@ import { useChatContext } from "@/providers/ChatProvider";
 import { cn } from "@/lib/utils";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { FilesPopover } from "@/app/components/TasksFilesSidebar";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useQueryState } from "nuqs";
 
 interface ChatInterfaceProps {
   assistant: Assistant | null;
 }
+
+const SUGGESTED_PROMPTS = [
+  "Find papers for a research topic",
+  "Plan an experiment pipeline",
+  "Brainstorm research directions",
+];
 
 const getStatusIcon = (status: TodoItem["status"], className?: string) => {
   switch (status) {
@@ -74,7 +90,11 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
 
   const [input, setInput] = useState("");
   const [autoApprove, setAutoApprove] = useState(false);
+  const [autoApproveDialogOpen, setAutoApproveDialogOpen] = useState(false);
   const autoApprovedRef = useRef<unknown>(null);
+  const [threadId] = useQueryState("threadId");
+  const previousThreadIdRef = useRef(threadId);
+  const preserveAutoApproveForNewThreadRef = useRef(false);
   const { scrollRef, contentRef } = useStickToBottom();
 
   const {
@@ -105,6 +125,27 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
       interruptValue.action_requests.length > 0);
   const submitDisabled = isLoading || !assistant || hasPendingInterrupt;
 
+  const turnOffAutoApprove = useCallback(() => {
+    setAutoApprove(false);
+    setAutoApproveDialogOpen(false);
+    autoApprovedRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    const previousThreadId = previousThreadIdRef.current;
+    if (previousThreadId === threadId) return;
+
+    const preserveForNewThread =
+      previousThreadId === null &&
+      threadId !== null &&
+      preserveAutoApproveForNewThreadRef.current;
+
+    if (!preserveForNewThread) turnOffAutoApprove();
+
+    preserveAutoApproveForNewThreadRef.current = false;
+    previousThreadIdRef.current = threadId;
+  }, [threadId, turnOffAutoApprove]);
+
   const handleSubmit = useCallback(
     (e?: FormEvent) => {
       if (e) {
@@ -112,10 +153,21 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
       }
       const messageText = input.trim();
       if (!messageText || isLoading || submitDisabled) return;
+      if (!threadId && autoApprove) {
+        preserveAutoApproveForNewThreadRef.current = true;
+      }
       sendMessage(messageText);
       setInput("");
     },
-    [input, isLoading, sendMessage, setInput, submitDisabled]
+    [
+      autoApprove,
+      input,
+      isLoading,
+      sendMessage,
+      setInput,
+      submitDisabled,
+      threadId,
+    ]
   );
 
   const handleKeyDown = useCallback(
@@ -143,6 +195,11 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
         el.setSelectionRange(content.length, content.length);
       }
     });
+  }, []);
+
+  const handleSuggestedPrompt = useCallback((prompt: string) => {
+    setInput(prompt);
+    requestAnimationFrame(() => textareaRef.current?.focus());
   }, []);
 
   // Auto-approve: when enabled, approve any pending tool-execution interrupt
@@ -318,6 +375,48 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
 
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
+      <Dialog
+        open={autoApproveDialogOpen}
+        onOpenChange={setAutoApproveDialogOpen}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enable Auto-approve?</DialogTitle>
+            <DialogDescription>
+              EvoScientist will run tool actions in this research without asking
+              you to review each one. Turn this on only when you trust the
+              current task and deployment.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100">
+            <TriangleAlert
+              className="mt-0.5 size-4 shrink-0"
+              aria-hidden="true"
+            />
+            <p>
+              Auto-approve turns off automatically when you switch research or
+              start a new chat.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => setAutoApproveDialogOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={() => {
+                setAutoApprove(true);
+                setAutoApproveDialogOpen(false);
+              }}
+              className="bg-amber-600 text-white hover:bg-amber-700"
+            >
+              Enable Auto-approve
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <div
         className="flex-1 overflow-y-auto overflow-x-hidden overscroll-contain"
         ref={scrollRef}
@@ -332,6 +431,29 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
             </div>
           ) : (
             <>
+              {processedMessages.length === 0 && !isLoading && !threadId && (
+                <div className="flex min-h-[50vh] flex-col items-center justify-center px-4 text-center">
+                  <h2 className="text-pretty text-xl font-semibold">
+                    Start a Research Conversation
+                  </h2>
+                  <p className="mt-2 max-w-lg text-sm text-muted-foreground">
+                    Ask EvoScientist to explore literature, shape an experiment,
+                    or develop a research direction.
+                  </p>
+                  <div className="mt-5 flex max-w-2xl flex-wrap justify-center gap-2">
+                    {SUGGESTED_PROMPTS.map((prompt) => (
+                      <button
+                        key={prompt}
+                        type="button"
+                        onClick={() => handleSuggestedPrompt(prompt)}
+                        className="rounded-full border border-border bg-background px-3 py-2 text-sm text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               {processedMessages.map((data, index) => {
                 const messageUi = ui?.filter(
                   (u: any) => u.metadata?.message_id === data.message.id
@@ -588,6 +710,27 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
               )}
             </div>
           )}
+          {autoApprove && (
+            <div
+              aria-live="polite"
+              className="flex items-center justify-between gap-3 border-b border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100"
+            >
+              <span className="flex items-center gap-1.5">
+                <TriangleAlert
+                  className="size-3.5 shrink-0"
+                  aria-hidden="true"
+                />
+                Tool actions will run without review.
+              </span>
+              <button
+                type="button"
+                onClick={turnOffAutoApprove}
+                className="shrink-0 rounded px-2 py-1 font-semibold transition-colors hover:bg-amber-200 focus-visible:ring-2 focus-visible:ring-amber-700 dark:hover:bg-amber-900"
+              >
+                Turn Off
+              </button>
+            </div>
+          )}
           <form
             onSubmit={handleSubmit}
             className="flex flex-col"
@@ -612,13 +755,17 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
             <div className="flex items-center justify-between gap-2 p-3">
               <button
                 type="button"
-                onClick={() => setAutoApprove((v) => !v)}
+                onClick={() =>
+                  autoApprove
+                    ? turnOffAutoApprove()
+                    : setAutoApproveDialogOpen(true)
+                }
                 aria-pressed={autoApprove}
                 title="Auto-approve all tool actions in this conversation"
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors",
                   autoApprove
-                    ? "bg-[var(--brand)] text-[var(--brand-foreground)]"
+                    ? "bg-amber-600 text-white hover:bg-amber-700"
                     : "text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
@@ -626,7 +773,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                   className="size-3.5"
                   aria-hidden="true"
                 />
-                Auto-approve
+                {autoApprove ? "Auto-approve On" : "Auto-approve"}
               </button>
               <div className="flex justify-end gap-2">
                 <Button

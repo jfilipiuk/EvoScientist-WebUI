@@ -188,7 +188,7 @@ export function ToolApprovalInterrupt({
           <Textarea
             value={rejectionMessage}
             onChange={(e) => setRejectionMessage(e.target.value)}
-            placeholder="Explain why you're rejecting this action..."
+            placeholder="Explain why you're rejecting this action…"
             className="text-sm"
             rows={2}
             disabled={isLoading}
@@ -215,7 +215,7 @@ export function ToolApprovalInterrupt({
               className="bg-green-600 text-white hover:bg-green-700 dark:bg-green-600 dark:hover:bg-green-700"
             >
               <Check size={14} />
-              {isLoading ? "Saving..." : "Save & Approve"}
+              {isLoading ? "Saving…" : "Save & Approve"}
             </Button>
           </>
         ) : showRejectionInput ? (
@@ -237,7 +237,7 @@ export function ToolApprovalInterrupt({
               onClick={handleRejectConfirm}
               disabled={isLoading}
             >
-              {isLoading ? "Rejecting..." : "Confirm Reject"}
+              {isLoading ? "Rejecting…" : "Confirm Reject"}
             </Button>
           </>
         ) : (
@@ -276,7 +276,7 @@ export function ToolApprovalInterrupt({
                 )}
               >
                 <Check size={14} />
-                {isLoading ? "Approving..." : "Approve"}
+                {isLoading ? "Approving…" : "Approve"}
               </Button>
             )}
           </>

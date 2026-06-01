@@ -149,7 +149,7 @@ export const FileViewDialog = React.memo<{
               <Input
                 value={fileName}
                 onChange={(e) => setFileName(e.target.value)}
-                placeholder="Enter filename..."
+                placeholder="Enter filename…"
                 className="text-base font-medium"
                 aria-invalid={!fileNameIsValid}
               />
@@ -208,7 +208,7 @@ export const FileViewDialog = React.memo<{
             <Textarea
               value={fileContent}
               onChange={(e) => setFileContent(e.target.value)}
-              placeholder="Enter file content..."
+              placeholder="Enter file content…"
               className="h-full min-h-[400px] resize-none font-mono text-sm"
             />
           ) : (

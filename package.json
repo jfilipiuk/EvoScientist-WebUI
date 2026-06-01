@@ -1,6 +1,6 @@
 {
   "name": "@evoscientist/webui",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Web UI for EvoScientist — a self-evolving AI scientist built on DeepAgents/LangGraph.",
   "type": "module",
   "license": "Apache-2.0",
@@ -49,7 +49,6 @@
     "@types/uuid": "^9.0.8",
     "class-variance-authority": "^0.7.1",
     "clsx": "^1.2.1",
-    "date-fns": "^4.1.0",
     "lucide-react": "^0.539.0",
     "next": "^16.2.5",
     "nuqs": "^2.8.8",

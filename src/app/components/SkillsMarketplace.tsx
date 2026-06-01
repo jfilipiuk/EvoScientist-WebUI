@@ -58,7 +58,7 @@ export function SkillsMarketplace() {
       <div className="mx-auto max-w-[1024px] px-6 py-8">
         <header className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-semibold">Skills</h2>
+            <h2 className="text-2xl font-semibold">Research Skills</h2>
             <p className="mt-1 text-sm text-muted-foreground">
               Skills installed for EvoScientist. Anything you install from
               elsewhere shows up here automatically.
@@ -69,7 +69,7 @@ export function SkillsMarketplace() {
             onClick={load}
             disabled={loading}
             aria-label="Refresh"
-            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            className="rounded-md p-2 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
           >
             <RotateCw
               className={loading ? "size-4 animate-spin" : "size-4"}
@@ -87,7 +87,12 @@ export function SkillsMarketplace() {
             Loading skills…
           </div>
         ) : error ? (
-          <p className="text-sm text-destructive">{error}</p>
+          <p
+            role="alert"
+            className="text-sm text-destructive"
+          >
+            {error}
+          </p>
         ) : skills.length === 0 ? (
           <p className="text-sm text-muted-foreground">
             No skills installed yet.
@@ -97,7 +102,7 @@ export function SkillsMarketplace() {
             {skills.map((s) => (
               <div
                 key={s.name}
-                className="group relative rounded-lg border border-border bg-card p-4"
+                className="group relative rounded-lg border border-border bg-card p-4 pr-12"
               >
                 <div className="flex items-start gap-3">
                   <Puzzle
@@ -116,7 +121,8 @@ export function SkillsMarketplace() {
                   onClick={() => uninstall(s.name)}
                   disabled={removing === s.name}
                   aria-label={`Uninstall ${s.name}`}
-                  className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground opacity-0 transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:opacity-100 group-hover:opacity-100"
+                  title={`Uninstall ${s.name}`}
+                  className="absolute right-2 top-2 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive focus-visible:ring-2 focus-visible:ring-ring md:opacity-0 md:focus-visible:opacity-100 md:group-hover:opacity-100"
                 >
                   {removing === s.name ? (
                     <Loader2

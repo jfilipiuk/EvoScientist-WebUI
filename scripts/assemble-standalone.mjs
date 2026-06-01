@@ -42,6 +42,18 @@ for (const entry of await readdir(OUT)) {
   }
 }
 
+// Strip source maps (*.map): debug-only artifacts the published runtime never
+// needs. Removing them keeps the package lean and avoids shipping a stack-trace
+// → source mapping. Safe to delete — source maps are never required at runtime.
+let strippedMaps = 0;
+for (const entry of await readdir(OUT, { recursive: true })) {
+  if (entry.endsWith(".map")) {
+    await rm(`${OUT}/${entry}`, { force: true });
+    strippedMaps++;
+  }
+}
+
 console.log(
-  `✓ Assembled standalone server into ${OUT}/ (run: node ${OUT}/server.js)`
+  `✓ Assembled standalone server into ${OUT}/ ` +
+    `(${strippedMaps} source map(s) stripped; run: node ${OUT}/server.js)`
 );
