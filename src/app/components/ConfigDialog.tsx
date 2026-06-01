@@ -34,10 +34,22 @@ export function ConfigDialog({
   const inputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
-    if (open) {
-      setError(null);
-      if (initialConfig) setDeploymentUrl(initialConfig.deploymentUrl);
+    if (!open) return;
+    setError(null);
+    if (initialConfig?.deploymentUrl) {
+      setDeploymentUrl(initialConfig.deploymentUrl);
+      return;
     }
+    // First run (no saved config): prefill from the EvoScientist backend's
+    // configured port (config.yaml / env), instead of guessing the default.
+    fetch("/api/evosci-config")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d?.deploymentUrl) setDeploymentUrl(d.deploymentUrl);
+      })
+      .catch(() => {
+        // Keep the hardcoded default already in state.
+      });
   }, [open, initialConfig]);
 
   const handleSave = () => {
