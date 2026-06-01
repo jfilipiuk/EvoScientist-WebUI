@@ -600,8 +600,8 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                 hasPendingInterrupt
                   ? "Respond to the request above to continue…"
                   : isLoading
-                  ? "Running…"
-                  : "Write your message…"
+                  ? "Researching…"
+                  : "Message EvoScientist…"
               }
               className="font-inherit field-sizing-content flex-1 resize-none border-0 bg-transparent px-[18px] pb-[13px] pt-[14px] text-sm leading-7 text-primary outline-none placeholder:text-tertiary disabled:cursor-not-allowed"
               rows={1}
