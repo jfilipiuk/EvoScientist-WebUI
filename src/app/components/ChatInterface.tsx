@@ -20,6 +20,8 @@ import {
   ShieldCheck,
   Sparkles,
   TriangleAlert,
+  Paperclip,
+  X,
 } from "lucide-react";
 import { ChatMessage } from "@/app/components/ChatMessage";
 import {
@@ -37,6 +39,7 @@ import { extractStringFromMessageContent } from "@/app/utils/utils";
 import { useChatContext } from "@/providers/ChatProvider";
 import { cn } from "@/lib/utils";
 import { formatModel } from "@/lib/model";
+import { lastTextOf, type SubAgentStep } from "@/lib/subAgentActivity";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { FilesPopover } from "@/app/components/TasksFilesSidebar";
 import {
@@ -48,6 +51,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { useQueryState } from "nuqs";
+import { toast } from "sonner";
 
 interface ChatInterfaceProps {
   assistant: Assistant | null;
@@ -58,6 +62,12 @@ const SUGGESTED_PROMPTS = [
   "Plan an experiment pipeline",
   "Brainstorm research directions",
 ];
+
+interface UploadedWorkspaceFile {
+  name: string;
+  path: string;
+  size: number;
+}
 
 const getStatusIcon = (status: TodoItem["status"], className?: string) => {
   switch (status) {
@@ -89,8 +99,11 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
   const [metaOpen, setMetaOpen] = useState<"tasks" | "files" | null>(null);
   const tasksContainerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const uploadInputRef = useRef<HTMLInputElement | null>(null);
 
   const [input, setInput] = useState("");
+  const [pendingFiles, setPendingFiles] = useState<UploadedWorkspaceFile[]>([]);
+  const [isUploadingFiles, setIsUploadingFiles] = useState(false);
   const [autoApprove, setAutoApprove] = useState(false);
   const [autoApproveDialogOpen, setAutoApproveDialogOpen] = useState(false);
   const autoApprovedRef = useRef<unknown>(null);
@@ -112,6 +125,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
     sendMessage,
     stopStream,
     resumeInterrupt,
+    subAgentActivity,
   } = useChatContext();
 
   // The model behind the latest assistant reply (read from message metadata).
@@ -128,6 +142,56 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
     return null;
   }, [messages]);
 
+  // Bind captured sub-agent activity (keyed by subgraph namespace) to each task
+  // tool call → its live steps. B': match a finished sub-agent to a task by its
+  // final text == the task's result; assign still-running sub-agents to the
+  // remaining task calls in order. Returns { taskToolCallId: SubAgentStep[] }.
+  const subAgentSteps = useMemo(() => {
+    const out: Record<string, SubAgentStep[]> = {};
+    const nsKeys = Object.keys(subAgentActivity);
+    if (nsKeys.length === 0) return out;
+
+    const taskIds: string[] = [];
+    const results: Record<string, string> = {};
+    for (const m of messages) {
+      if (m.type === "ai") {
+        const tcs = (m as { tool_calls?: { id?: string; name?: string }[] })
+          .tool_calls;
+        for (const tc of tcs ?? []) {
+          if (tc.name === "task" && tc.id) taskIds.push(tc.id);
+        }
+      } else if (m.type === "tool") {
+        const id = (m as { tool_call_id?: string }).tool_call_id;
+        if (id) results[id] = extractStringFromMessageContent(m);
+      }
+    }
+
+    const norm = (s: string) => s.replace(/\s+/g, " ").trim();
+    const claimed = new Set<string>();
+    // 1) Finished tasks: match by output text.
+    for (const id of taskIds) {
+      const r = norm(results[id] ?? "");
+      if (!r) continue;
+      const key = nsKeys.find((k) => {
+        if (claimed.has(k)) return false;
+        const last = norm(lastTextOf(subAgentActivity[k]));
+        return last !== "" && (r.includes(last) || last.includes(r));
+      });
+      if (key) {
+        out[id] = subAgentActivity[key];
+        claimed.add(key);
+      }
+    }
+    // 2) Running tasks (no result yet): take remaining namespaces in order.
+    const remaining = nsKeys.filter((k) => !claimed.has(k));
+    let ri = 0;
+    for (const id of taskIds) {
+      if (out[id] || results[id]) continue;
+      if (ri < remaining.length) out[id] = subAgentActivity[remaining[ri++]];
+    }
+    return out;
+  }, [messages, subAgentActivity]);
+
   // While the agent waits on an *actionable* interrupt (approval or ask_user),
   // lock the composer so the user answers via the in-message controls — a free
   // message would cancel the pending tool call and corrupt the thread.
@@ -140,7 +204,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
     (Array.isArray(interruptValue?.action_requests) &&
       interruptValue.action_requests.length > 0);
   const submitDisabled = isLoading || !assistant || hasPendingInterrupt;
-
   const turnOffAutoApprove = useCallback(() => {
     setAutoApprove(false);
     setAutoApproveDialogOpen(false);
@@ -158,9 +221,54 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
 
     if (!preserveForNewThread) turnOffAutoApprove();
 
+    setPendingFiles([]);
     preserveAutoApproveForNewThreadRef.current = false;
     previousThreadIdRef.current = threadId;
   }, [threadId, turnOffAutoApprove]);
+
+  const handleFilesSelected = useCallback(
+    async (event: React.ChangeEvent<HTMLInputElement>) => {
+      const selectedFiles = Array.from(event.target.files ?? []);
+      event.target.value = "";
+      if (selectedFiles.length === 0) return;
+
+      setIsUploadingFiles(true);
+      try {
+        const formData = new FormData();
+        selectedFiles.forEach((file) => formData.append("files", file));
+        const response = await fetch("/api/workspace/upload", {
+          method: "POST",
+          body: formData,
+        });
+        const data = (await response.json()) as {
+          files?: UploadedWorkspaceFile[];
+          error?: string;
+        };
+        if (!response.ok || !data.files) {
+          throw new Error(data.error || "Failed to upload files.");
+        }
+        setPendingFiles((currentFiles) => [...currentFiles, ...data.files!]);
+        toast.success(
+          `${data.files.length} file${
+            data.files.length === 1 ? "" : "s"
+          } uploaded to the workspace.`
+        );
+      } catch (error) {
+        toast.error(
+          error instanceof Error ? error.message : "Failed to upload files."
+        );
+      } finally {
+        setIsUploadingFiles(false);
+      }
+    },
+    []
+  );
+
+  const removePendingFile = useCallback((filePath: string) => {
+    setPendingFiles((currentFiles) =>
+      currentFiles.filter((file) => file.path !== filePath)
+    );
+  }, []);
 
   const handleSubmit = useCallback(
     (e?: FormEvent) => {
@@ -168,17 +276,27 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
         e.preventDefault();
       }
       const messageText = input.trim();
-      if (!messageText || isLoading || submitDisabled) return;
+      if (!messageText || isLoading || isUploadingFiles || submitDisabled)
+        return;
       if (!threadId && autoApprove) {
         preserveAutoApproveForNewThreadRef.current = true;
       }
-      sendMessage(messageText);
+      const workspaceFiles =
+        pendingFiles.length > 0
+          ? `\n\nWorkspace files uploaded for this request:\n${pendingFiles
+              .map((file) => `- ${file.path}`)
+              .join("\n")}`
+          : "";
+      sendMessage(`${messageText}${workspaceFiles}`);
       setInput("");
+      setPendingFiles([]);
     },
     [
       autoApprove,
       input,
       isLoading,
+      isUploadingFiles,
+      pendingFiles,
       sendMessage,
       setInput,
       submitDisabled,
@@ -269,7 +387,18 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
       string,
       { message: Message; toolCalls: ToolCall[] }
     >();
-    messages.forEach((message: Message) => {
+    // Sub-agent (subgraph) messages stream in alongside the main conversation
+    // when streamSubgraphs is on. They carry a NESTED langgraph_checkpoint_ns
+    // ("tools:<id>|…") while the main agent's own messages are single-segment.
+    // Keep them OUT of the main flow — they render under each sub-agent block's
+    // "Steps" instead. (streamMetadata is live-only; once complete these messages
+    // aren't in thread state anyway.)
+    const visibleMessages = messages.filter((message: Message) => {
+      const meta = stream.getMessagesMetadata(message)?.streamMetadata;
+      const ns = meta?.["langgraph_checkpoint_ns"];
+      return !(typeof ns === "string" && ns.includes("|"));
+    });
+    visibleMessages.forEach((message: Message) => {
       if (message.type === "ai") {
         const toolCallsInMessage: Array<{
           id?: string;
@@ -361,7 +490,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
         showAvatar: data.message.type !== prevMessage?.type,
       };
     });
-  }, [messages, interrupt]);
+  }, [messages, interrupt, stream]);
 
   const groupedTodos = {
     in_progress: todos.filter((t) => t.status === "in_progress"),
@@ -493,6 +622,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                     graphId={assistant?.graph_id}
                     onEditMessage={handleEditMessage}
                     autoApprove={autoApprove}
+                    subAgentSteps={subAgentSteps}
                   />
                 );
               })}
@@ -763,6 +893,42 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
             onSubmit={handleSubmit}
             className="flex flex-col"
           >
+            {pendingFiles.length > 0 && (
+              <div
+                aria-label="Attached files"
+                className="flex flex-wrap gap-2 border-b border-border px-3 py-2"
+              >
+                {pendingFiles.map((file) => (
+                  <span
+                    key={file.path}
+                    className="inline-flex max-w-full items-center gap-1.5 rounded-md border border-border bg-muted px-2 py-1 text-xs text-foreground"
+                  >
+                    <FileIcon
+                      className="size-3.5 shrink-0 text-muted-foreground"
+                      aria-hidden="true"
+                    />
+                    <span
+                      className="max-w-48 truncate"
+                      title={file.path}
+                    >
+                      {file.name}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => removePendingFile(file.path)}
+                      aria-label={`Remove ${file.name} from this message`}
+                      title={`Remove ${file.name} from this message`}
+                      className="rounded-sm text-muted-foreground transition-colors hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <X
+                        className="size-3.5"
+                        aria-hidden="true"
+                      />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <textarea
               ref={textareaRef}
               value={input}
@@ -781,34 +947,60 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
               rows={1}
             />
             <div className="flex items-center justify-between gap-2 p-3">
-              <button
-                type="button"
-                onClick={() =>
-                  autoApprove
-                    ? turnOffAutoApprove()
-                    : setAutoApproveDialogOpen(true)
-                }
-                aria-pressed={autoApprove}
-                title="Auto-approve all tool actions in this conversation"
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors",
-                  autoApprove
-                    ? "bg-amber-600 text-white hover:bg-amber-700"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )}
-              >
-                <ShieldCheck
-                  className="size-3.5"
-                  aria-hidden="true"
+              <div className="flex items-center gap-1">
+                <input
+                  ref={uploadInputRef}
+                  type="file"
+                  multiple
+                  onChange={handleFilesSelected}
+                  disabled={submitDisabled || isUploadingFiles}
+                  className="hidden"
                 />
-                {autoApprove ? "Auto-approve On" : "Auto-approve"}
-              </button>
+                <button
+                  type="button"
+                  onClick={() => uploadInputRef.current?.click()}
+                  disabled={submitDisabled || isUploadingFiles}
+                  aria-label="Upload files to workspace"
+                  title="Upload files to workspace (max 50 MB each)"
+                  className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Paperclip
+                    className="size-4"
+                    aria-hidden="true"
+                  />
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    autoApprove
+                      ? turnOffAutoApprove()
+                      : setAutoApproveDialogOpen(true)
+                  }
+                  aria-pressed={autoApprove}
+                  title="Auto-approve all tool actions in this conversation"
+                  className={cn(
+                    "inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium transition-colors",
+                    autoApprove
+                      ? "bg-amber-600 text-white hover:bg-amber-700"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )}
+                >
+                  <ShieldCheck
+                    className="size-3.5"
+                    aria-hidden="true"
+                  />
+                  {autoApprove ? "Auto-approve On" : "Auto-approve"}
+                </button>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button
                   type={isLoading ? "button" : "submit"}
                   variant={isLoading ? "destructive" : "default"}
                   onClick={isLoading ? stopStream : handleSubmit}
-                  disabled={!isLoading && (submitDisabled || !input.trim())}
+                  disabled={
+                    !isLoading &&
+                    (submitDisabled || isUploadingFiles || !input.trim())
+                  }
                 >
                   {isLoading ? (
                     <>

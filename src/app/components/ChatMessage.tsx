@@ -11,6 +11,7 @@ import type {
   ReviewConfig,
 } from "@/app/types/types";
 import { Message } from "@langchain/langgraph-sdk";
+import type { SubAgentStep } from "@/lib/subAgentActivity";
 import { Brain, Check, ChevronRight, Copy, Pencil } from "lucide-react";
 import {
   extractSubAgentContent,
@@ -30,6 +31,70 @@ interface ChatMessageProps {
   graphId?: string;
   onEditMessage?: (content: string) => void;
   autoApprove?: boolean;
+  /** Live intermediate steps per task tool-call id (sub-agent activity). */
+  subAgentSteps?: Record<string, SubAgentStep[]>;
+}
+
+/** A sub-agent's live steps: clickable tool-call boxes (each paired with its
+ *  result) interleaved with the sub-agent's own text, reusing the same
+ *  ToolCallBox the main agent uses. */
+function SubAgentSteps({
+  steps,
+  hideFinalText,
+}: {
+  steps: SubAgentStep[];
+  hideFinalText?: boolean;
+}) {
+  const resultByCallId = new Map<string, string>();
+  for (const s of steps) {
+    if (s.kind === "tool_result" && s.toolCallId) {
+      resultByCallId.set(s.toolCallId, s.text);
+    }
+  }
+  // The sub-agent's final text is shown below as the task Output; once the task
+  // is complete, drop that trailing text step here so it isn't duplicated.
+  let lastTextIdx = -1;
+  if (hideFinalText) {
+    for (let i = steps.length - 1; i >= 0; i--) {
+      if (steps[i].kind === "text") {
+        lastTextIdx = i;
+        break;
+      }
+    }
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {steps.map((s, i) => {
+        if (i === lastTextIdx) return null;
+        if (s.kind === "tool_call") {
+          const toolCall: ToolCall = {
+            id: s.id,
+            name: s.name,
+            args: s.args,
+            result: resultByCallId.get(s.id),
+            status: resultByCallId.has(s.id) ? "completed" : "pending",
+          };
+          return (
+            <ToolCallBox
+              key={s.id || `tc-${i}`}
+              toolCall={toolCall}
+            />
+          );
+        }
+        if (s.kind === "text") {
+          return (
+            <div
+              key={`txt-${i}`}
+              className="px-2 text-sm"
+            >
+              <MarkdownContent content={s.text} />
+            </div>
+          );
+        }
+        return null;
+      })}
+    </div>
+  );
 }
 
 export const ChatMessage = React.memo<ChatMessageProps>(
@@ -45,6 +110,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     graphId,
     onEditMessage,
     autoApprove,
+    subAgentSteps,
   }) => {
     const isUser = message.type === "human";
     const messageContent = extractStringFromMessageContent(message);
@@ -95,13 +161,17 @@ export const ChatMessage = React.memo<ChatMessageProps>(
       Record<string, boolean>
     >({});
     const isSubAgentExpanded = useCallback(
-      (id: string) => expandedSubAgents[id] ?? true,
+      // Collapsed by default — while running the pill shows a spinner; click to
+      // expand and watch the sub-agent's steps.
+      (id: string) => expandedSubAgents[id] ?? false,
       [expandedSubAgents]
     );
     const toggleSubAgent = useCallback((id: string) => {
+      // Default is collapsed (?? false), so an untouched block must expand on the
+      // FIRST click — toggle off the same default the renderer uses.
       setExpandedSubAgents((prev) => ({
         ...prev,
-        [id]: prev[id] === undefined ? false : !prev[id],
+        [id]: !(prev[id] ?? false),
       }));
     }, []);
 
@@ -279,6 +349,19 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                             content={extractSubAgentContent(subAgent.input)}
                           />
                         </div>
+                        {(subAgentSteps?.[subAgent.id]?.length ?? 0) > 0 && (
+                          <>
+                            <h4 className="text-primary/70 mb-2 text-xs font-semibold uppercase tracking-wider">
+                              Steps
+                            </h4>
+                            <div className="mb-4">
+                              <SubAgentSteps
+                                steps={subAgentSteps![subAgent.id]}
+                                hideFinalText={!!subAgent.output}
+                              />
+                            </div>
+                          </>
+                        )}
                         {subAgent.output && (
                           <>
                             <h4 className="text-primary/70 mb-2 text-xs font-semibold uppercase tracking-wider">

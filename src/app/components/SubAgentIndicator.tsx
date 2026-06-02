@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { Bot, ChevronDown, ChevronUp } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp, Loader2 } from "lucide-react";
 import type { SubAgent } from "@/app/types/types";
 
 interface SubAgentIndicatorProps {
@@ -13,6 +13,7 @@ interface SubAgentIndicatorProps {
 
 export const SubAgentIndicator = React.memo<SubAgentIndicatorProps>(
   ({ subAgent, onClick, isExpanded = true }) => {
+    const running = subAgent.status === "pending";
     return (
       <div className="w-fit max-w-[70vw] overflow-hidden rounded-lg bg-card">
         <Button
@@ -22,10 +23,17 @@ export const SubAgentIndicator = React.memo<SubAgentIndicatorProps>(
           className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
         >
           <span className="bg-[var(--brand)]/10 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--brand)]">
-            <Bot
-              className="size-3.5"
-              aria-hidden="true"
-            />
+            {running ? (
+              <Loader2
+                className="size-3.5 animate-spin"
+                aria-hidden="true"
+              />
+            ) : (
+              <Bot
+                className="size-3.5"
+                aria-hidden="true"
+              />
+            )}
           </span>
           <span className="truncate text-sm font-semibold text-foreground">
             {subAgent.subAgentName}
