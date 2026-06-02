@@ -1,95 +1,13 @@
 import { promises as fs } from "fs";
-import { homedir } from "os";
-import { basename, dirname, join, resolve } from "path";
+import { basename, dirname, resolve } from "path";
 import { NextRequest, NextResponse } from "next/server";
+import { getWorkspaceDir, hasControlChar } from "@/lib/server/workspace";
 
 export const runtime = "nodejs";
 
-const WORKSPACE_SIDECAR = join(
-  homedir(),
-  ".config",
-  "evoscientist",
-  "langgraph_dev.workspace.json"
-);
 const MAX_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_TOTAL_BYTES = 100 * 1024 * 1024;
 const MAX_FILES = 20;
-
-interface WorkspaceSidecar {
-  workspace?: unknown;
-  pid?: unknown;
-}
-
-/** True if the name contains any C0 control char (< 0x20) or DEL (0x7f). A
- *  newline in a filename would otherwise be spliced into the prompt sent to the
- *  agent (instruction injection); control chars have no place in a filename. */
-function hasControlChar(name: string): boolean {
-  for (let i = 0; i < name.length; i += 1) {
-    const code = name.charCodeAt(i);
-    if (
-      code < 0x20 || // C0 controls (incl. NUL, tab, newline)
-      code === 0x7f || // DEL
-      (code >= 0x80 && code <= 0x9f) || // C1 controls
-      code === 0x2028 || // line separator
-      code === 0x2029 // paragraph separator
-    ) {
-      return true;
-    }
-  }
-  return false;
-}
-
-/** True if a process with `pid` is currently running (signal 0 = existence probe). */
-function isProcessAlive(pid: number): boolean {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch (error) {
-    // EPERM means the process exists but we may not signal it — still alive.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
-  }
-}
-
-/**
- * Resolve the workspace of the *currently running* EvoScientist deployment.
- *
- * The sidecar records `{ workspace, pid }` of the langgraph dev that owns this
- * workspace. We only trust it when that pid is still alive — a stale sidecar
- * from a crashed/previous session must not silently redirect uploads to a
- * directory the live deployment no longer uses. Falls back to the launcher env.
- */
-async function getWorkspaceDir() {
-  let workspace: string | undefined;
-  try {
-    const sidecar = JSON.parse(
-      await fs.readFile(WORKSPACE_SIDECAR, "utf-8")
-    ) as WorkspaceSidecar;
-    const ws = sidecar.workspace;
-    const pid = sidecar.pid;
-    if (typeof ws === "string" && ws.trim()) {
-      const hasPid = typeof pid === "number" && pid > 0;
-      // With a recorded backend pid, only trust the sidecar while that process
-      // is alive; older sidecars without one fall back to trusting it as before.
-      if (!hasPid || isProcessAlive(pid as number)) workspace = ws;
-    }
-  } catch {
-    // Older/manual setups may not have a sidecar. Fall back to the launcher env.
-  }
-
-  workspace ||= process.env.EVOSCIENTIST_WORKSPACE_DIR;
-  if (!workspace) {
-    throw new Error(
-      "No active EvoScientist workspace found. Start the backend with `EvoSci deploy` first."
-    );
-  }
-
-  const workspaceDir = resolve(workspace);
-  const stat = await fs.stat(workspaceDir);
-  if (!stat.isDirectory()) {
-    throw new Error("The active EvoScientist workspace is not a directory.");
-  }
-  return workspaceDir;
-}
 
 function sanitizeFileName(name: string) {
   const fileName = basename(name.replaceAll("\\", "/")).trim();

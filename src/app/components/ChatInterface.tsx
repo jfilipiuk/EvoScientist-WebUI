@@ -17,6 +17,7 @@ import {
   Clock,
   Circle,
   FileIcon,
+  FolderOpen,
   ShieldCheck,
   Sparkles,
   TriangleAlert,
@@ -42,6 +43,7 @@ import { formatModel } from "@/lib/model";
 import { lastTextOf, type SubAgentStep } from "@/lib/subAgentActivity";
 import { useStickToBottom } from "use-stick-to-bottom";
 import { FilesPopover } from "@/app/components/TasksFilesSidebar";
+import { WorkspacePanel } from "@/app/components/WorkspacePanel";
 import {
   Dialog,
   DialogContent,
@@ -96,7 +98,9 @@ const getStatusIcon = (status: TodoItem["status"], className?: string) => {
 };
 
 export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
-  const [metaOpen, setMetaOpen] = useState<"tasks" | "files" | null>(null);
+  const [metaOpen, setMetaOpen] = useState<
+    "tasks" | "files" | "workspace" | null
+  >(null);
   const tasksContainerRef = useRef<HTMLDivElement | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -649,7 +653,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
             "focus-within:ring-2 focus-within:ring-ring"
           )}
         >
-          {(hasTasks || hasFiles) && (
+          {/* Always rendered: the Workspace tab is available even with no tasks
+              or state files yet. */}
+          {
             <div className="flex max-h-72 flex-col overflow-y-auto border-b border-border bg-sidebar empty:hidden">
               {!metaOpen && (
                 <>
@@ -756,10 +762,27 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                       );
                     })();
 
+                    const workspaceTrigger = (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setMetaOpen((prev) =>
+                            prev === "workspace" ? null : "workspace"
+                          )
+                        }
+                        className="flex flex-shrink-0 cursor-pointer items-center gap-2 px-[18px] py-3 text-left text-sm"
+                        aria-expanded={metaOpen === "workspace"}
+                      >
+                        <FolderOpen size={16} />
+                        Workspace
+                      </button>
+                    );
+
                     return (
-                      <div className="grid grid-cols-[1fr_auto_auto] items-center">
-                        {tasksTrigger}
+                      <div className="flex items-center">
+                        <div className="min-w-0 flex-1">{tasksTrigger}</div>
                         {filesTrigger}
+                        {workspaceTrigger}
                       </div>
                     );
                   })()}
@@ -800,6 +823,18 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                         </span>
                       </button>
                     )}
+                    <button
+                      type="button"
+                      className="inline-flex items-center gap-2 py-3 pr-4 first:pl-[18px] aria-expanded:font-semibold"
+                      onClick={() =>
+                        setMetaOpen((prev) =>
+                          prev === "workspace" ? null : "workspace"
+                        )
+                      }
+                      aria-expanded={metaOpen === "workspace"}
+                    >
+                      Workspace
+                    </button>
                     <button
                       aria-label="Close"
                       className="flex-1"
@@ -851,11 +886,17 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                         />
                       </div>
                     )}
+
+                    {metaOpen === "workspace" && (
+                      <div className="mb-6 pt-2">
+                        <WorkspacePanel />
+                      </div>
+                    )}
                   </div>
                 </>
               )}
             </div>
-          )}
+          }
           {autoApprove && (
             <div
               aria-live="polite"
