@@ -2,6 +2,7 @@
   "name": "@evoscientist/webui",
   "version": "0.0.2",
   "description": "Web UI for EvoScientist — a self-evolving AI scientist built on DeepAgents/LangGraph.",
+  "author": "Xi Zhang <zacharyzhang2022@gmail.com>",
   "type": "module",
   "license": "Apache-2.0",
   "keywords": [
@@ -13,6 +14,14 @@
     "chat-ui",
     "webui"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/EvoScientist/EvoScientist-WebUI.git"
+  },
+  "bugs": {
+    "url": "https://github.com/EvoScientist/EvoScientist-WebUI/issues"
+  },
+  "homepage": "https://github.com/EvoScientist/EvoScientist-WebUI#readme",
   "bin": {
     "evoscientist-webui": "./bin/evoscientist-webui.mjs"
   },
