@@ -2,7 +2,7 @@
 
 import React from "react";
 import { Button } from "@/components/ui/button";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { Bot, ChevronDown, ChevronUp } from "lucide-react";
 import type { SubAgent } from "@/app/types/types";
 
 interface SubAgentIndicatorProps {
@@ -14,31 +14,36 @@ interface SubAgentIndicatorProps {
 export const SubAgentIndicator = React.memo<SubAgentIndicatorProps>(
   ({ subAgent, onClick, isExpanded = true }) => {
     return (
-      <div className="w-fit max-w-[70vw] overflow-hidden rounded-lg border-none bg-card shadow-none outline-none">
+      <div className="w-fit max-w-[70vw] overflow-hidden rounded-lg bg-card">
         <Button
           variant="ghost"
           size="sm"
           onClick={onClick}
-          className="flex w-full items-center justify-between gap-2 border-none px-4 py-2 text-left shadow-none outline-none transition-colors duration-200"
+          className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left"
         >
-          <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex items-center gap-2">
-              <span className="font-sans text-[15px] font-bold leading-[140%] tracking-[-0.6px] text-[#3F3F46]">
-                {subAgent.subAgentName}
-              </span>
-            </div>
-            {isExpanded ? (
-              <ChevronUp
-                size={14}
-                className="shrink-0 text-[#70707B]"
-              />
-            ) : (
-              <ChevronDown
-                size={14}
-                className="shrink-0 text-[#70707B]"
-              />
-            )}
-          </div>
+          <span className="bg-[var(--brand)]/10 flex size-5 shrink-0 items-center justify-center rounded-md text-[var(--brand)]">
+            <Bot
+              className="size-3.5"
+              aria-hidden="true"
+            />
+          </span>
+          <span className="truncate text-sm font-semibold text-foreground">
+            {subAgent.subAgentName}
+          </span>
+          <span className="text-xs font-normal text-muted-foreground">
+            subagent
+          </span>
+          {isExpanded ? (
+            <ChevronUp
+              size={14}
+              className="ml-auto shrink-0 text-muted-foreground"
+            />
+          ) : (
+            <ChevronDown
+              size={14}
+              className="ml-auto shrink-0 text-muted-foreground"
+            />
+          )}
         </Button>
       </div>
     );
