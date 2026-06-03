@@ -52,58 +52,54 @@ function HomePageInner({
         config.assistantId
       );
 
-    if (isUUID) {
-      // We should try to fetch the assistant directly with this UUID
-      try {
-        const data = await client.assistants.get(config.assistantId);
-        setAssistant(data);
-      } catch (error) {
-        console.error("Failed to fetch assistant:", error);
-        setAssistant({
-          assistant_id: config.assistantId,
-          graph_id: config.assistantId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          config: {},
-          metadata: {},
-          version: 1,
-          name: "Assistant",
-          context: {},
-        });
+    const resolve = async (): Promise<Assistant> => {
+      // A UUID addresses one assistant directly; otherwise list the graph's
+      // assistants and prefer the system default (fall back to the first).
+      if (isUUID) {
+        return await client.assistants.get(config.assistantId);
       }
-    } else {
+      const assistants = await client.assistants.search({
+        graphId: config.assistantId,
+        limit: 100,
+      });
+      const found =
+        assistants.find((a) => a.metadata?.["created_by"] === "system") ??
+        assistants[0];
+      if (!found) throw new Error("No assistant found for this graph.");
+      return found;
+    };
+
+    // The langgraph backend may not be ready the instant the page mounts — the
+    // request then fails with "Failed to fetch". Retry a few times so a transient
+    // startup race self-heals instead of surfacing a scary console error.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
-        // We should try to list out the assistants for this graph, and then use the default one.
-        // TODO: Paginate this search, but 100 should be enough for graph name
-        const assistants = await client.assistants.search({
-          graphId: config.assistantId,
-          limit: 100,
-        });
-        const defaultAssistant = assistants.find(
-          (assistant) => assistant.metadata?.["created_by"] === "system"
-        );
-        if (defaultAssistant === undefined) {
-          throw new Error("No default assistant found");
-        }
-        setAssistant(defaultAssistant);
+        setAssistant(await resolve());
+        return;
       } catch (error) {
-        console.error(
-          "Failed to find default assistant from graph_id: try setting the assistant_id directly:",
+        if (attempt < 2) {
+          await new Promise((r) => setTimeout(r, 700));
+          continue;
+        }
+        console.warn(
+          "Couldn't resolve the EvoScientist assistant; addressing the graph by id instead. Is the backend running?",
           error
         );
-        setAssistant({
-          assistant_id: config.assistantId,
-          graph_id: config.assistantId,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          config: {},
-          metadata: {},
-          version: 1,
-          name: config.assistantId,
-          context: {},
-        });
       }
     }
+
+    // Fallback: address the graph directly by id (works on `langgraph dev`).
+    setAssistant({
+      assistant_id: config.assistantId,
+      graph_id: config.assistantId,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+      config: {},
+      metadata: {},
+      version: 1,
+      name: config.assistantId,
+      context: {},
+    });
   }, [client, config.assistantId]);
 
   useEffect(() => {

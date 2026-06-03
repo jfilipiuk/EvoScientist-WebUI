@@ -101,7 +101,10 @@ export function useThreads(props: {
         try {
           if (thread.values && typeof thread.values === "object") {
             const values = thread.values as any;
-            const firstHumanMessage = values.messages.find(
+            const messages: any[] = Array.isArray(values.messages)
+              ? values.messages
+              : [];
+            const firstHumanMessage = messages.find(
               (m: any) => m.type === "human"
             );
             if (firstHumanMessage?.content) {
@@ -111,15 +114,26 @@ export function useThreads(props: {
                   : firstHumanMessage.content[0]?.text || "";
               title = content.slice(0, 50) + (content.length > 50 ? "..." : "");
             }
-            const firstAiMessage = values.messages.find(
-              (m: any) => m.type === "ai"
-            );
-            if (firstAiMessage?.content) {
-              const content =
-                typeof firstAiMessage.content === "string"
-                  ? firstAiMessage.content
-                  : firstAiMessage.content[0]?.text || "";
-              description = content.slice(0, 100);
+            // Preview = the first AI message that actually has text. Agentic
+            // threads often open with tool-call-only AI messages (empty
+            // content), so picking the literal first AI message would leave the
+            // row blank (looking like an "empty" thread). Also join all text
+            // parts rather than just content[0].
+            const aiText = (content: any): string => {
+              if (typeof content === "string") return content;
+              if (Array.isArray(content))
+                return content
+                  .map((p: any) => (typeof p?.text === "string" ? p.text : ""))
+                  .join("");
+              return "";
+            };
+            for (const m of messages) {
+              if (m?.type !== "ai") continue;
+              const t = aiText(m.content).trim();
+              if (t) {
+                description = t.slice(0, 100);
+                break;
+              }
             }
           }
         } catch {

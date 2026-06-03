@@ -139,7 +139,10 @@ export const WorkspaceFileDialog = React.memo<{
       open={true}
       onOpenChange={onClose}
     >
-      <DialogContent className="flex h-[80vh] max-h-[80vh] min-w-[60vw] flex-col p-6">
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex h-[80vh] max-h-[80vh] min-w-[60vw] flex-col p-6"
+      >
         <DialogTitle className="sr-only">{path}</DialogTitle>
         <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
           <div className="flex min-w-0 items-center gap-2">

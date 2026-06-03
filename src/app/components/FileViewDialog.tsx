@@ -138,7 +138,10 @@ export const FileViewDialog = React.memo<{
       open={true}
       onOpenChange={onClose}
     >
-      <DialogContent className="flex h-[80vh] max-h-[80vh] min-w-[60vw] flex-col p-6">
+      <DialogContent
+        aria-describedby={undefined}
+        className="flex h-[80vh] max-h-[80vh] min-w-[60vw] flex-col p-6"
+      >
         <DialogTitle className="sr-only">
           {file?.path || "New File"}
         </DialogTitle>
