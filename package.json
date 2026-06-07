@@ -36,9 +36,9 @@
     "access": "public"
   },
   "scripts": {
-    "dev": "next dev --turbopack --port 4716 --host 127.0.0.1",
+    "dev": "next dev --turbopack --port 4716",
     "build": "next build && node scripts/assemble-standalone.mjs",
-    "start": "next start --port 4716 --host 127.0.0.1",
+    "start": "next start --port 4716",
     "start:dist": "node dist/server.js",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
@@ -47,8 +47,8 @@
     "prepack": "npm run build"
   },
   "dependencies": {
-    "@langchain/core": "1.1.19",
-    "@langchain/langgraph-sdk": "1.0.3",
+    "@langchain/core": "^1.1.48",
+    "@langchain/langgraph-sdk": "^1.9.18",
     "@radix-ui/react-dialog": "^1.1.15",
     "@radix-ui/react-label": "^2.1.8",
     "@radix-ui/react-scroll-area": "^1.2.9",
@@ -59,19 +59,19 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^1.2.1",
     "lucide-react": "^0.539.0",
-    "next": "^16.2.5",
+    "next": "^16.2.7",
     "nuqs": "^2.8.8",
     "react": "19.1.0",
     "react-dom": "19.1.0",
     "react-markdown": "^9.0.1",
     "react-resizable-panels": "^3.0.6",
-    "react-syntax-highlighter": "^15.6.1",
+    "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.0",
     "sonner": "^2.0.7",
     "swr": "^2.4.1",
     "tailwind-merge": "^2.6",
     "use-stick-to-bottom": "^1.1.1",
-    "uuid": "^9.0.1"
+    "uuid": "^14.0.0"
   },
   "devDependencies": {
     "@eslint/js": "^9",
@@ -82,7 +82,7 @@
     "@types/react-dom": "^19",
     "autoprefixer": "^10.4.24",
     "eslint": "^9",
-    "eslint-config-next": "16",
+    "eslint-config-next": "^16.2.7",
     "eslint-plugin-react-hooks": "^5.2.0",
     "eslint-plugin-react-refresh": "^0.4",
     "postcss": "^8.5.6",

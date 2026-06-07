@@ -71,7 +71,7 @@ export function useChat({
         [key]: [...(prev[key] ?? []), ...steps],
       }));
     },
-    experimental_thread: thread,
+    thread: thread,
   });
 
   const sendMessage = useCallback(

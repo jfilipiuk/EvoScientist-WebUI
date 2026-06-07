@@ -30,21 +30,10 @@ Open <http://localhost:4716>. In the configuration dialog, enter your **Deployme
 > You need two things running: the EvoScientist backend (`EvoSci deploy`, port 6174)
 > and this UI (`npm run dev`, port 4716).
 
-### Network access (LAN)
-
-To allow other devices on your local network to access the WebUI, bind to `0.0.0.0`:
-
-```bash
-# Command-line flag
-npm run dev -- --host 0.0.0.0
-
-# Environment variable
-HOSTNAME=0.0.0.0 npm run dev
-
-# Or create .env.local with:
-# HOSTNAME=0.0.0.0
-# PORT=4716
-```
+> **Note:** The dev server (`npm run dev`) is for local use only — don't expose it on
+> the LAN. Binding `npm run dev` to `0.0.0.0` triggers cross-origin issues, so it isn't
+> supported. For network access, use a production build instead
+> (see [Network access (LAN)](#network-access-lan) below).
 
 ## Production build
 
@@ -53,14 +42,28 @@ npm run build        # outputs the optimized app
 npm start            # serves it on http://localhost:4716
 ```
 
-For network access in production, use the launcher:
+### Network access (LAN)
+
+The production server binds to `0.0.0.0` by default, so other devices on your network
+can reach it at `http://<your-LAN-IP>:4716` out of the box — no extra flags needed.
+
+To pick a specific host/port, use the launcher (works on every platform):
 
 ```bash
-# Allow LAN access
-evoscientist-webui --host 0.0.0.0
+evoscientist-webui --host 0.0.0.0 --port 4716
+```
 
-# Or set environment variables
+Or set environment variables before `npm start`:
+
+```bash
+# macOS / Linux
 HOSTNAME=0.0.0.0 PORT=4716 npm start
+
+# Windows (PowerShell)
+$env:HOSTNAME="0.0.0.0"; $env:PORT="4716"; npm start
+
+# Windows (CMD)
+set HOSTNAME=0.0.0.0 && set PORT=4716 && npm start
 ```
 
 ## Configuration
@@ -76,10 +79,9 @@ HOSTNAME=0.0.0.0 PORT=4716 npm start
 
 | Command                | Description                             |
 | ---------------------- | --------------------------------------- |
-| `npm run dev`          | Start the dev server on port 4716       |
-| `npm run dev -- --host 0.0.0.0` | Allow LAN access                 |
+| `npm run dev`          | Start the dev server on port 4716 (local only) |
 | `npm run build`        | Production build                        |
-| `npm start`            | Serve the production build on port 4716 |
+| `npm start`            | Serve the production build on port 4716 (binds `0.0.0.0`, LAN-accessible) |
 | `npm run lint`         | Lint with ESLint                        |
 | `npm run format`       | Format with Prettier                    |
 | `npm run format:check` | Check formatting (used in CI)           |
