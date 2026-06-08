@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { flushSync } from "react-dom";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { AlertCircle, Check, X, Pencil } from "lucide-react";
@@ -12,6 +13,7 @@ interface ToolApprovalInterruptProps {
   reviewConfig?: ReviewConfig;
   onResume: (value: any) => void;
   isLoading?: boolean;
+  onSubmitted?: () => void;
 }
 
 export function ToolApprovalInterrupt({
@@ -19,27 +21,36 @@ export function ToolApprovalInterrupt({
   reviewConfig,
   onResume,
   isLoading,
+  onSubmitted,
 }: ToolApprovalInterruptProps) {
   const [rejectionMessage, setRejectionMessage] = useState("");
   const [isEditing, setIsEditing] = useState(false);
   const [editedArgs, setEditedArgs] = useState<Record<string, unknown>>({});
   const [showRejectionInput, setShowRejectionInput] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
-  const allowedDecisions = reviewConfig?.allowedDecisions ?? [
-    "approve",
-    "reject",
-    "edit",
-  ];
+  const allowedDecisions = reviewConfig?.allowedDecisions ??
+    reviewConfig?.allowed_decisions ?? ["approve", "reject", "edit"];
+
+  const submitDecision = (value: any) => {
+    flushSync(() => {
+      setSubmitted(true);
+      if (onSubmitted) {
+        onSubmitted();
+      }
+    });
+    onResume(value);
+  };
 
   const handleApprove = () => {
-    onResume({
+    submitDecision({
       decisions: [{ type: "approve" }],
     });
   };
 
   const handleReject = () => {
     if (showRejectionInput) {
-      onResume({
+      submitDecision({
         decisions: [
           {
             type: "reject",
@@ -53,7 +64,7 @@ export function ToolApprovalInterrupt({
   };
 
   const handleRejectConfirm = () => {
-    onResume({
+    submitDecision({
       decisions: [
         {
           type: "reject",
@@ -65,7 +76,7 @@ export function ToolApprovalInterrupt({
 
   const handleEdit = () => {
     if (isEditing) {
-      onResume({
+      submitDecision({
         decisions: [
           {
             type: "edit",
@@ -103,6 +114,10 @@ export function ToolApprovalInterrupt({
       setEditedArgs((prev) => ({ ...prev, [key]: value }));
     }
   };
+
+  if (submitted) {
+    return null;
+  }
 
   return (
     <div className="w-full rounded-md border border-border bg-muted/30 p-4">
@@ -201,6 +216,7 @@ export function ToolApprovalInterrupt({
         {isEditing ? (
           <>
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={cancelEditing}
@@ -209,6 +225,7 @@ export function ToolApprovalInterrupt({
               Cancel
             </Button>
             <Button
+              type="button"
               size="sm"
               onClick={handleEdit}
               disabled={isLoading}
@@ -221,6 +238,7 @@ export function ToolApprovalInterrupt({
         ) : showRejectionInput ? (
           <>
             <Button
+              type="button"
               variant="outline"
               size="sm"
               onClick={() => {
@@ -232,6 +250,7 @@ export function ToolApprovalInterrupt({
               Cancel
             </Button>
             <Button
+              type="button"
               variant="destructive"
               size="sm"
               onClick={handleRejectConfirm}
@@ -244,6 +263,7 @@ export function ToolApprovalInterrupt({
           <>
             {allowedDecisions.includes("reject") && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
                 onClick={handleReject}
@@ -256,6 +276,7 @@ export function ToolApprovalInterrupt({
             )}
             {allowedDecisions.includes("edit") && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
                 onClick={startEditing}
@@ -267,6 +288,7 @@ export function ToolApprovalInterrupt({
             )}
             {allowedDecisions.includes("approve") && (
               <Button
+                type="button"
                 size="sm"
                 onClick={handleApprove}
                 disabled={isLoading}

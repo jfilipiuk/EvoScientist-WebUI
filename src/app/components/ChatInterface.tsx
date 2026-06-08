@@ -71,6 +71,59 @@ interface UploadedWorkspaceFile {
   size: number;
 }
 
+function getMessageToolCalls(message: Message): Array<{
+  id?: string;
+  name: string;
+  args: Record<string, unknown>;
+}> {
+  const messageWithTools = message as Message & {
+    tool_calls?: Array<{ name?: string }>;
+  };
+  const toolCalls: Array<{
+    id?: string;
+    function?: { name?: string; arguments?: unknown };
+    name?: string;
+    type?: string;
+    args?: unknown;
+    input?: unknown;
+  }> = [];
+
+  if (
+    message.additional_kwargs?.tool_calls &&
+    Array.isArray(message.additional_kwargs.tool_calls)
+  ) {
+    toolCalls.push(...message.additional_kwargs.tool_calls);
+  } else if (
+    messageWithTools.tool_calls &&
+    Array.isArray(messageWithTools.tool_calls)
+  ) {
+    toolCalls.push(
+      ...messageWithTools.tool_calls.filter(
+        (toolCall: { name?: string }) => toolCall.name !== ""
+      )
+    );
+  } else if (Array.isArray(message.content)) {
+    toolCalls.push(
+      ...message.content.filter(
+        (block: { type?: string }) => block.type === "tool_use"
+      )
+    );
+  }
+
+  return toolCalls.map((toolCall) => {
+    const rawArgs =
+      toolCall.function?.arguments || toolCall.args || toolCall.input || {};
+    return {
+      id: toolCall.id,
+      name: toolCall.function?.name || toolCall.name || toolCall.type || "",
+      args:
+        rawArgs && typeof rawArgs === "object"
+          ? (rawArgs as Record<string, unknown>)
+          : {},
+    };
+  });
+}
+
 const getStatusIcon = (status: TodoItem["status"], className?: string) => {
   switch (status) {
     case "completed":
@@ -114,7 +167,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
   const [threadId] = useQueryState("threadId");
   const previousThreadIdRef = useRef(threadId);
   const preserveAutoApproveForNewThreadRef = useRef(false);
-  const { scrollRef, contentRef } = useStickToBottom();
+  const { scrollRef, contentRef, scrollToBottom } = useStickToBottom();
 
   const {
     stream,
@@ -131,6 +184,14 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
     resumeInterrupt,
     subAgentActivity,
   } = useChatContext();
+
+  // Re-engage stick-to-bottom whenever a new run starts (sending a message or
+  // resuming an interrupt → isLoading flips true). Without this, if the user had
+  // drifted even slightly off the bottom after the previous answer, a short new
+  // reply would render below the fold and look like nothing happened.
+  useEffect(() => {
+    if (isLoading) void scrollToBottom();
+  }, [isLoading, scrollToBottom]);
 
   // The model behind the latest assistant reply (read from message metadata).
   // Token/context usage is intentionally NOT shown — the backend doesn't persist
@@ -404,54 +465,15 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
     });
     visibleMessages.forEach((message: Message) => {
       if (message.type === "ai") {
-        const toolCallsInMessage: Array<{
-          id?: string;
-          function?: { name?: string; arguments?: unknown };
-          name?: string;
-          type?: string;
-          args?: unknown;
-          input?: unknown;
-        }> = [];
-        if (
-          message.additional_kwargs?.tool_calls &&
-          Array.isArray(message.additional_kwargs.tool_calls)
-        ) {
-          toolCallsInMessage.push(...message.additional_kwargs.tool_calls);
-        } else if (message.tool_calls && Array.isArray(message.tool_calls)) {
-          toolCallsInMessage.push(
-            ...message.tool_calls.filter(
-              (toolCall: { name?: string }) => toolCall.name !== ""
-            )
-          );
-        } else if (Array.isArray(message.content)) {
-          const toolUseBlocks = message.content.filter(
-            (block: { type?: string }) => block.type === "tool_use"
-          );
-          toolCallsInMessage.push(...toolUseBlocks);
-        }
-        const toolCallsWithStatus = toolCallsInMessage.map(
-          (toolCall: {
-            id?: string;
-            function?: { name?: string; arguments?: unknown };
-            name?: string;
-            type?: string;
-            args?: unknown;
-            input?: unknown;
-          }) => {
-            const name =
-              toolCall.function?.name ||
-              toolCall.name ||
-              toolCall.type ||
-              "unknown";
-            const args =
-              toolCall.function?.arguments ||
-              toolCall.args ||
-              toolCall.input ||
-              {};
+        const toolCallsWithStatus = getMessageToolCalls(message).map(
+          (toolCall, toolCallIndex) => {
+            const name = toolCall.name || "unknown";
             return {
-              id: toolCall.id || `tool-${Math.random()}`,
+              id:
+                toolCall.id ||
+                `${message.id ?? "ai-message"}-tool-${toolCallIndex}-${name}`,
               name,
-              args,
+              args: toolCall.args,
               status: interrupt ? "interrupted" : ("pending" as const),
             } as ToolCall;
           }
@@ -505,21 +527,49 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
   const hasTasks = todos.length > 0;
   const hasFiles = Object.keys(files).length > 0;
 
-  // Parse out any action requests or review configs from the interrupt
-  const actionRequestsMap: Map<string, ActionRequest> | null = useMemo(() => {
-    const actionRequests =
-      interrupt?.value && (interrupt.value as any)["action_requests"];
-    if (!actionRequests) return new Map<string, ActionRequest>();
-    return new Map(actionRequests.map((ar: ActionRequest) => [ar.name, ar]));
+  // Ordered list of pending tool-approval requests from the interrupt. We hand
+  // ChatMessage the ORDER (not a name-keyed map) so two calls to the same tool
+  // in one turn (e.g. two `execute`) each bind to their OWN request/args instead
+  // of both collapsing onto the last one. `Array.isArray` guards a malformed
+  // payload — a non-array `action_requests` here would otherwise throw and blank
+  // the whole page.
+  const actionRequests: ActionRequest[] = useMemo(() => {
+    const raw = interrupt?.value && (interrupt.value as any)["action_requests"];
+    return Array.isArray(raw) ? (raw as ActionRequest[]) : [];
   }, [interrupt]);
+  const [submittedActionRequestKeys, setSubmittedActionRequestKeys] = useState<
+    Set<string>
+  >(() => new Set());
+  useEffect(() => {
+    if (actionRequests.length === 0) {
+      setSubmittedActionRequestKeys(new Set());
+    }
+  }, [actionRequests.length]);
+  const markActionRequestSubmitted = useCallback((key: string) => {
+    setSubmittedActionRequestKeys((current) => {
+      const next = new Set(current);
+      next.add(key);
+      return next;
+    });
+  }, []);
 
   const reviewConfigsMap: Map<string, ReviewConfig> | null = useMemo(() => {
     const reviewConfigs =
       interrupt?.value && (interrupt.value as any)["review_configs"];
-    if (!reviewConfigs) return new Map<string, ReviewConfig>();
-    return new Map(
-      reviewConfigs.map((rc: ReviewConfig) => [rc.actionName, rc])
-    );
+    if (!Array.isArray(reviewConfigs)) return new Map<string, ReviewConfig>();
+    const entries: Array<readonly [string, ReviewConfig]> = [];
+    for (const rc of reviewConfigs as ReviewConfig[]) {
+      const actionName = rc.actionName ?? rc.action_name;
+      if (!actionName) continue;
+      entries.push([
+        actionName,
+        {
+          actionName,
+          allowedDecisions: rc.allowedDecisions ?? rc.allowed_decisions,
+        },
+      ]);
+    }
+    return new Map<string, ReviewConfig>(entries);
   }, [interrupt]);
 
   return (
@@ -580,7 +630,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
             </div>
           ) : (
             <>
-              {processedMessages.length === 0 && !isLoading && !threadId && (
+              {processedMessages.length === 0 && !isLoading && (
                 <div className="flex min-h-[42vh] flex-col items-center justify-center px-3 text-center">
                   <h2 className="text-pretty text-lg font-semibold sm:text-xl">
                     Start Research
@@ -614,9 +664,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(({ assistant }) => {
                     message={data.message}
                     toolCalls={data.toolCalls}
                     isLoading={isLoading}
-                    actionRequestsMap={
-                      isLastMessage ? actionRequestsMap : undefined
-                    }
+                    actionRequests={isLastMessage ? actionRequests : undefined}
+                    submittedActionRequestKeys={submittedActionRequestKeys}
+                    onActionRequestSubmitted={markActionRequestSubmitted}
                     reviewConfigsMap={
                       isLastMessage ? reviewConfigsMap : undefined
                     }

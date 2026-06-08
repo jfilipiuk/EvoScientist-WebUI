@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
+import { copyText } from "@/lib/clipboard";
 
 interface MemoryEntry {
   path: string;
@@ -286,12 +287,9 @@ export function MemoryPanel() {
 
   const copy = async () => {
     if (!file) return;
-    try {
-      await navigator.clipboard.writeText(file.content);
+    if (await copyText(file.content)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    } catch {
-      // clipboard may be unavailable; ignore
     }
   };
 

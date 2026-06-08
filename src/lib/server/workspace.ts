@@ -8,7 +8,8 @@
 
 import { promises as fs } from "fs";
 import { homedir } from "os";
-import { join, relative, resolve, sep } from "path";
+import { basename, dirname, join, relative, resolve, sep } from "path";
+import { randomUUID } from "crypto";
 import type { NextRequest } from "next/server";
 
 export const WORKSPACE_SIDECAR = join(
@@ -230,4 +231,189 @@ export function isCrossOrigin(request: NextRequest): boolean {
   }
   const origin = request.headers.get("origin");
   return !!origin && origin !== request.nextUrl.origin;
+}
+
+// ---------------------------------------------------------------------------
+// In-place editing (save / delete) of workspace text files
+//
+// Mirrors the write/delete guards in lib/server/memory.ts. Editing is
+// overwrite-only on text/code files: safeResolve requires the target to exist,
+// so this path never creates new files (uploads handle creation) and never
+// touches a binary. Same-origin enforcement lives in the route.
+// ---------------------------------------------------------------------------
+
+/** Text/code extensions editable in place. Superset of the previewable text
+ *  types so anything the viewer renders as text can also be saved. Binary
+ *  (images/pdf/etc.) is intentionally excluded. */
+const EDITABLE_EXTS = new Set([
+  "txt",
+  "text",
+  "md",
+  "markdown",
+  "log",
+  "csv",
+  "tsv",
+  "json",
+  "jsonl",
+  "yaml",
+  "yml",
+  "toml",
+  "xml",
+  "ini",
+  "cfg",
+  "conf",
+  "env",
+  "py",
+  "js",
+  "jsx",
+  "ts",
+  "tsx",
+  "sh",
+  "bash",
+  "zsh",
+  "r",
+  "jl",
+  "cpp",
+  "cc",
+  "c",
+  "h",
+  "hpp",
+  "java",
+  "go",
+  "rs",
+  "rb",
+  "php",
+  "swift",
+  "kt",
+  "cs",
+  "sql",
+  "tex",
+  "bib",
+  "rst",
+  "css",
+  "scss",
+  "html",
+]);
+
+export const MAX_WORKSPACE_WRITE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * Re-verify, immediately before a mutating fs op, that the target's parent
+ * directory still canonically resolves inside the workspace. `safeResolve`
+ * canonicalizes once up front, but a parent component could be swapped for a
+ * symlink in the window before the write/rename/rm (TOCTOU). This narrows that
+ * window; it cannot fully close it without openat-style fds (not in Node's fs),
+ * so a determined local race remains theoretically possible — acceptable for a
+ * single-user local dev tool.
+ */
+async function assertParentInside(
+  workspaceDir: string,
+  target: string
+): Promise<void> {
+  let realParent: string;
+  try {
+    realParent = await fs.realpath(dirname(target));
+  } catch {
+    throw new Error("Path is not accessible.");
+  }
+  if (
+    realParent !== workspaceDir &&
+    !realParent.startsWith(workspaceDir + sep)
+  ) {
+    throw new Error("Path is not accessible.");
+  }
+}
+
+function extOf(name: string): string {
+  const i = name.lastIndexOf(".");
+  return i >= 0 ? name.slice(i + 1).toLowerCase() : "";
+}
+
+/** True if a file may be edited (and thus saved) as text in the workspace. */
+export function isEditableTextFile(name: string): boolean {
+  return EDITABLE_EXTS.has(extOf(name));
+}
+
+/**
+ * Overwrite an existing workspace text file (atomic temp + rename). Preserves
+ * the original file's permission bits so the agent's files keep their mode.
+ * Rejects binaries, oversized content, and anything that isn't already a file.
+ */
+export async function writeWorkspaceFile(
+  workspaceDir: string,
+  relPath: string,
+  content: string
+): Promise<{ path: string; size: number; mtime: number }> {
+  if (typeof content !== "string") throw new Error("Content must be a string.");
+  if (Buffer.byteLength(content, "utf-8") > MAX_WORKSPACE_WRITE_BYTES) {
+    throw new Error("This file is too large to save.");
+  }
+  const name = relPath.replaceAll("\\", "/").split("/").pop() || relPath;
+  if (!isEditableTextFile(name)) {
+    throw new Error("Only text/code files can be edited.");
+  }
+  // Never edit *through* a final-component symlink: a planted `note.py ->
+  // secret.bin` would otherwise let an editable-looking name overwrite a
+  // non-editable/binary target inside the workspace. lstat the lexical path so
+  // we inspect the link itself, not what it points at.
+  const lexical = resolveInside(workspaceDir, relPath);
+  let linkStat;
+  try {
+    linkStat = await fs.lstat(lexical);
+  } catch {
+    throw new Error("Only files can be edited.");
+  }
+  if (linkStat.isSymbolicLink()) {
+    throw new Error("Editing symlinks is not allowed.");
+  }
+  // safeResolve canonicalizes + requires existence, so editing is overwrite-only
+  // and a symlink can't redirect the write outside the workspace.
+  const target = await safeResolve(workspaceDir, relPath);
+  // Validate the RESOLVED target's extension too (defends against a parent
+  // symlink redirecting the basename), not just the requested name.
+  if (!isEditableTextFile(basename(target))) {
+    throw new Error("Only text/code files can be edited.");
+  }
+  const st = await fs.stat(target);
+  if (!st.isFile()) throw new Error("Only files can be edited.");
+
+  const tmp = `${target}.${randomUUID()}.tmp`;
+  try {
+    await assertParentInside(workspaceDir, target);
+    await fs.writeFile(tmp, content, {
+      encoding: "utf-8",
+      mode: st.mode & 0o777, // keep the original file's permissions
+    });
+    await assertParentInside(workspaceDir, target);
+    await fs.rename(tmp, target);
+  } catch (e) {
+    await fs.rm(tmp, { force: true }).catch(() => {});
+    throw e;
+  }
+
+  const after = await fs.stat(target);
+  return {
+    path: relPath.replaceAll("\\", "/").replace(/^\/+/, ""),
+    size: after.size,
+    mtime: after.mtimeMs,
+  };
+}
+
+/** Permanently delete a workspace file (never a directory). */
+export async function deleteWorkspaceFile(
+  workspaceDir: string,
+  relPath: string
+): Promise<void> {
+  // safeResolve enforces containment (and rejects a final symlink whose target
+  // escapes the workspace). We then act on the LEXICAL path so deleting a
+  // symlink unlinks the link itself, not its target — lstat/rm don't follow the
+  // final-component symlink.
+  await safeResolve(workspaceDir, relPath);
+  const lexical = resolveInside(workspaceDir, relPath);
+  const st = await fs.lstat(lexical);
+  if (st.isDirectory()) throw new Error("Only files can be deleted.");
+  // Re-verify the parent is still inside the workspace just before unlinking, to
+  // narrow the TOCTOU window after safeResolve (see assertParentInside).
+  await assertParentInside(workspaceDir, lexical);
+  await fs.rm(lexical, { force: true });
 }

@@ -7,6 +7,9 @@ import {
   getWorkspaceDir,
   safeResolve,
   isCrossOrigin,
+  writeWorkspaceFile,
+  deleteWorkspaceFile,
+  MAX_WORKSPACE_WRITE_BYTES,
 } from "@/lib/server/workspace";
 
 /** RFC 6266 Content-Disposition value with both an ASCII fallback and a UTF-8
@@ -111,6 +114,154 @@ export async function GET(request: NextRequest) {
     return NextResponse.json(
       {
         error: error instanceof Error ? error.message : "Failed to read file.",
+      },
+      { status: 400 }
+    );
+  }
+}
+
+// Coarse upfront guard before buffering the body. The precise per-content cap
+// lives in writeWorkspaceFile; a 5MB text payload JSON-encodes larger, so allow
+// generous headroom.
+const MAX_BODY_BYTES = MAX_WORKSPACE_WRITE_BYTES * 2 + 1024 * 1024;
+
+const BODY_TOO_LARGE = "BODY_TOO_LARGE";
+
+/**
+ * Read + JSON-parse a request body while enforcing a hard byte cap. A declared
+ * `content-length` is only a hint — it can be missing or forged smaller than the
+ * real body — so we read the stream chunk-by-chunk and abort the moment the cap
+ * is exceeded, instead of letting `request.json()` buffer an unbounded payload.
+ * Returns the parsed value (null on empty/invalid JSON); throws BODY_TOO_LARGE
+ * when the cap is hit.
+ */
+async function readJsonCapped(
+  request: NextRequest,
+  maxBytes: number
+): Promise<unknown> {
+  const stream = request.body;
+  if (!stream) {
+    // No readable stream available — fall back to the buffered path, but only
+    // when an honest, in-bounds content-length is present. A MISSING header must
+    // be rejected, not coerced: `Number(null)` is 0 (finite), which would slip a
+    // length-less body past the cap.
+    const raw = request.headers.get("content-length");
+    const len = raw && raw.trim() !== "" ? Number(raw) : NaN;
+    if (!Number.isFinite(len) || len < 0 || len > maxBytes) {
+      throw new Error(BODY_TOO_LARGE);
+    }
+    return await request.json().catch(() => null);
+  }
+  const reader = stream.getReader();
+  const chunks: Uint8Array[] = [];
+  let received = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (!value) continue;
+      received += value.byteLength;
+      if (received > maxBytes) {
+        await reader.cancel().catch(() => {});
+        throw new Error(BODY_TOO_LARGE);
+      }
+      chunks.push(value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // already released (e.g. after cancel)
+    }
+  }
+  if (received === 0) return null;
+  try {
+    return JSON.parse(Buffer.concat(chunks).toString("utf-8"));
+  } catch {
+    return null;
+  }
+}
+
+/** PUT ?path=<rel>  body {content}  → overwrite an existing text/code file. */
+export async function PUT(request: NextRequest) {
+  try {
+    if (isCrossOrigin(request)) {
+      return NextResponse.json(
+        { error: "Cross-origin workspace access is not allowed." },
+        { status: 403 }
+      );
+    }
+    // Fast reject when the client honestly declares an oversized body; the
+    // streamed cap below catches the missing/forged-length cases.
+    const declaredLen = Number(request.headers.get("content-length"));
+    if (Number.isFinite(declaredLen) && declaredLen > MAX_BODY_BYTES) {
+      return NextResponse.json(
+        { error: "Request body is too large." },
+        { status: 413 }
+      );
+    }
+    const relPath = request.nextUrl.searchParams.get("path");
+    if (!relPath) {
+      return NextResponse.json({ error: "Missing path." }, { status: 400 });
+    }
+    let body: { content?: unknown } | null;
+    try {
+      body = (await readJsonCapped(request, MAX_BODY_BYTES)) as {
+        content?: unknown;
+      } | null;
+    } catch (e) {
+      if (e instanceof Error && e.message === BODY_TOO_LARGE) {
+        return NextResponse.json(
+          { error: "Request body is too large." },
+          { status: 413 }
+        );
+      }
+      body = null;
+    }
+    if (!body || typeof body.content !== "string") {
+      return NextResponse.json(
+        { error: "File content is required." },
+        { status: 400 }
+      );
+    }
+    const workspaceDir = await getWorkspaceDir();
+    const result = await writeWorkspaceFile(
+      workspaceDir,
+      relPath,
+      body.content
+    );
+    return NextResponse.json({ ok: true, ...result });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error: error instanceof Error ? error.message : "Failed to save file.",
+      },
+      { status: 400 }
+    );
+  }
+}
+
+/** DELETE ?path=<rel>  → permanently delete a workspace file. */
+export async function DELETE(request: NextRequest) {
+  try {
+    if (isCrossOrigin(request)) {
+      return NextResponse.json(
+        { error: "Cross-origin workspace access is not allowed." },
+        { status: 403 }
+      );
+    }
+    const relPath = request.nextUrl.searchParams.get("path");
+    if (!relPath) {
+      return NextResponse.json({ error: "Missing path." }, { status: 400 });
+    }
+    const workspaceDir = await getWorkspaceDir();
+    await deleteWorkspaceFile(workspaceDir, relPath);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : "Failed to delete file.",
       },
       { status: 400 }
     );

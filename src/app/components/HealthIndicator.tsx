@@ -17,10 +17,10 @@ interface HealthIndicatorProps {
 const POLL_INTERVAL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 4_000;
 
-// Theme tokens (light + dark defined in globals.css). The base's bg-primary /
-// bg-secondary tokens are dead in this fork (see CLAUDE.md), so we reference the
-// CSS vars directly via arbitrary-value classes (the entries below).
-// NOTE: never write a bracketed class literal in a comment — Tailwind's content
+// Theme tokens (light + dark defined in globals.css). The base's shadcn
+// primary/secondary background tokens are dead in this fork (see CLAUDE.md), so
+// we reference CSS vars directly via arbitrary-value classes (the entries below).
+// NOTE: never put a bracketed class literal in a comment — Tailwind's content
 // scanner picks it up and emits real (sometimes invalid) CSS.
 const STATUS_META: Record<
   HealthStatus,
@@ -55,26 +55,32 @@ export function HealthIndicator({ deploymentUrl }: HealthIndicatorProps) {
   const [info, setInfo] = useState<BackendInfo | null>(null);
   // Monotonic id so a slow check against a previous URL can't clobber a newer one.
   const requestRef = useRef(0);
+  // Cancel the in-flight probe and suppress state updates after unmount.
+  const mountedRef = useRef(true);
+  const controllerRef = useRef<AbortController | null>(null);
 
   const check = useCallback(async () => {
     const requestId = ++requestRef.current;
     const base = deploymentUrl.replace(/\/+$/, "");
     if (!base) {
-      if (requestId === requestRef.current) {
+      if (requestId === requestRef.current && mountedRef.current) {
         setInfo(null);
         setStatus("offline");
       }
       return;
     }
 
+    // Abort any probe still in flight before starting a new one.
+    controllerRef.current?.abort();
     const controller = new AbortController();
+    controllerRef.current = controller;
     const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
     try {
       const response = await fetch(`${base}/info`, {
         signal: controller.signal,
         cache: "no-store",
       });
-      if (requestId !== requestRef.current) return;
+      if (requestId !== requestRef.current || !mountedRef.current) return;
       if (!response.ok) {
         setStatus("offline");
         return;
@@ -82,17 +88,20 @@ export function HealthIndicator({ deploymentUrl }: HealthIndicatorProps) {
       const data = (await response
         .json()
         .catch(() => null)) as BackendInfo | null;
-      if (requestId !== requestRef.current) return;
+      if (requestId !== requestRef.current || !mountedRef.current) return;
       setInfo(data);
       setStatus("online");
     } catch {
-      if (requestId === requestRef.current) setStatus("offline");
+      if (requestId === requestRef.current && mountedRef.current) {
+        setStatus("offline");
+      }
     } finally {
       clearTimeout(timeout);
     }
   }, [deploymentUrl]);
 
   useEffect(() => {
+    mountedRef.current = true;
     setStatus("checking");
     check();
     const interval = setInterval(check, POLL_INTERVAL_MS);
@@ -102,6 +111,8 @@ export function HealthIndicator({ deploymentUrl }: HealthIndicatorProps) {
     window.addEventListener("focus", recheck);
     window.addEventListener("online", recheck);
     return () => {
+      mountedRef.current = false;
+      controllerRef.current?.abort();
       clearInterval(interval);
       window.removeEventListener("focus", recheck);
       window.removeEventListener("online", recheck);

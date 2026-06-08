@@ -436,6 +436,7 @@ export function WorkspacePanel() {
         path={selected?.path ?? null}
         size={selected?.size}
         onClose={() => setSelected(null)}
+        onChanged={refresh}
       />
     </div>
   );

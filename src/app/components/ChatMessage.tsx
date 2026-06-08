@@ -1,6 +1,12 @@
 "use client";
 
-import React, { useMemo, useState, useCallback } from "react";
+import React, {
+  useMemo,
+  useState,
+  useCallback,
+  useEffect,
+  useRef,
+} from "react";
 import { SubAgentIndicator } from "@/app/components/SubAgentIndicator";
 import { ToolCallBox } from "@/app/components/ToolCallBox";
 import { MarkdownContent } from "@/app/components/MarkdownContent";
@@ -18,12 +24,17 @@ import {
   extractStringFromMessageContent,
 } from "@/app/utils/utils";
 import { cn } from "@/lib/utils";
+import { copyText } from "@/lib/clipboard";
+import { toast } from "sonner";
 
 interface ChatMessageProps {
   message: Message;
   toolCalls: ToolCall[];
   isLoading?: boolean;
-  actionRequestsMap?: Map<string, ActionRequest>;
+  /** Pending tool-approval requests for this turn, in interrupt order. */
+  actionRequests?: ActionRequest[];
+  submittedActionRequestKeys?: Set<string>;
+  onActionRequestSubmitted?: (key: string) => void;
   reviewConfigsMap?: Map<string, ReviewConfig>;
   ui?: any[];
   stream?: any;
@@ -102,7 +113,9 @@ export const ChatMessage = React.memo<ChatMessageProps>(
     message,
     toolCalls,
     isLoading,
-    actionRequestsMap,
+    actionRequests,
+    submittedActionRequestKeys,
+    onActionRequestSubmitted,
     reviewConfigsMap,
     ui,
     stream,
@@ -148,14 +161,101 @@ export const ChatMessage = React.memo<ChatMessageProps>(
         });
     }, [toolCalls]);
 
+    // Bind each pending approval request to the tool call it belongs to, keyed
+    // by tool-call id. Action requests carry no id, so match by (name, order of
+    // appearance): walk this message's tool calls in order and hand out the
+    // same-named requests in sequence. This makes two `execute` calls in one
+    // turn each show their OWN args (a plain name→request map would collapse
+    // both onto the last request), while a tool that needs no approval simply
+    // consumes none.
+    const actionRequestByToolCallId = useMemo(() => {
+      const out = new Map<
+        string,
+        { actionRequest: ActionRequest; actionIndex: number }
+      >();
+      if (!actionRequests || actionRequests.length === 0) return out;
+      const queues = new Map<
+        string,
+        { actionRequest: ActionRequest; actionIndex: number }[]
+      >();
+      actionRequests.forEach((ar, actionIndex) => {
+        const list = queues.get(ar.name);
+        const entry = {
+          actionRequest: ar,
+          actionIndex,
+        };
+        if (list) list.push(entry);
+        else queues.set(ar.name, [entry]);
+      });
+      const cursor = new Map<string, number>();
+      for (const tc of toolCalls) {
+        const list = queues.get(tc.name);
+        if (!list) continue;
+        const i = cursor.get(tc.name) ?? 0;
+        if (i < list.length) {
+          out.set(tc.id, list[i]);
+          cursor.set(tc.name, i + 1);
+        }
+      }
+      return out;
+    }, [actionRequests, toolCalls]);
+
+    const actionRequestsKey = useMemo(() => {
+      return JSON.stringify(
+        (actionRequests ?? []).map((ar) => ({
+          name: ar.name,
+          args: ar.args,
+        }))
+      );
+    }, [actionRequests]);
+    const pendingReviewDecisionsRef = useRef<Record<number, unknown>>({});
+    useEffect(() => {
+      pendingReviewDecisionsRef.current = {};
+    }, [actionRequestsKey]);
+
+    const handleResumeActionRequest = useCallback(
+      (actionIndex: number, value: any) => {
+        const decisions = value?.decisions;
+        if (!Array.isArray(decisions) || !actionRequests?.length) {
+          onResumeInterrupt?.(value);
+          return;
+        }
+        if (
+          actionRequests.length === 1 ||
+          decisions.length === actionRequests.length
+        ) {
+          onResumeInterrupt?.(value);
+          return;
+        }
+
+        const decision = decisions[0];
+        const next = {
+          ...pendingReviewDecisionsRef.current,
+          [actionIndex]: decision,
+        };
+        pendingReviewDecisionsRef.current = next;
+
+        const allDecided = actionRequests.every((_, index) => next[index]);
+        if (!allDecided) return;
+
+        pendingReviewDecisionsRef.current = {};
+        onResumeInterrupt?.({
+          decisions: actionRequests.map((_, index) => next[index]),
+        });
+      },
+      [actionRequests, onResumeInterrupt]
+    );
+
     const [thinkingOpen, setThinkingOpen] = useState(false);
     const [copied, setCopied] = useState(false);
-    const handleCopy = useCallback(() => {
+    const handleCopy = useCallback(async () => {
       if (!messageContent) return;
-      navigator.clipboard?.writeText(messageContent).then(() => {
+      if (await copyText(messageContent)) {
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-      });
+      } else {
+        toast.error("Couldn't copy to clipboard.");
+      }
     }, [messageContent]);
     const [expandedSubAgents, setExpandedSubAgents] = useState<
       Record<string, boolean>
@@ -303,7 +403,17 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                 const toolCallGenUiComponent = ui?.find(
                   (u) => u.metadata?.tool_call_id === toolCall.id
                 );
-                const actionRequest = actionRequestsMap?.get(toolCall.name);
+                const actionRequestEntry = actionRequestByToolCallId.get(
+                  toolCall.id
+                );
+                const actionRequest = actionRequestEntry?.actionRequest;
+                // Key the "already submitted" dedup by the tool-call id, which is
+                // unique per occurrence. Keying by name+args (as before) made two
+                // identical interrupts (e.g. two `execute pwd` in a row) collide,
+                // permanently hiding the second approval card.
+                const actionRequestKey = actionRequestEntry
+                  ? toolCall.id
+                  : undefined;
                 const reviewConfig = reviewConfigsMap?.get(toolCall.name);
                 return (
                   <ToolCallBox
@@ -313,8 +423,23 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                     stream={stream}
                     graphId={graphId}
                     actionRequest={actionRequest}
+                    actionRequestKey={actionRequestKey}
+                    actionRequestSubmitted={
+                      actionRequestKey
+                        ? submittedActionRequestKeys?.has(actionRequestKey)
+                        : undefined
+                    }
+                    onActionRequestSubmitted={onActionRequestSubmitted}
                     reviewConfig={reviewConfig}
-                    onResume={onResumeInterrupt}
+                    onResume={
+                      actionRequestEntry
+                        ? (value) =>
+                            handleResumeActionRequest(
+                              actionRequestEntry.actionIndex,
+                              value
+                            )
+                        : onResumeInterrupt
+                    }
                     isLoading={isLoading}
                     autoApprove={autoApprove}
                   />

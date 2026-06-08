@@ -47,8 +47,10 @@ export interface ActionRequest {
 }
 
 export interface ReviewConfig {
-  actionName: string;
+  actionName?: string;
+  action_name?: string;
   allowedDecisions?: string[];
+  allowed_decisions?: string[];
 }
 
 export interface ToolApprovalInterruptData {

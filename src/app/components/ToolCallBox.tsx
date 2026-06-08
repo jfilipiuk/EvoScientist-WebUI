@@ -29,6 +29,9 @@ interface ToolCallBoxProps {
   stream?: any;
   graphId?: string;
   actionRequest?: ActionRequest;
+  actionRequestKey?: string;
+  actionRequestSubmitted?: boolean;
+  onActionRequestSubmitted?: (key: string) => void;
   reviewConfig?: ReviewConfig;
   onResume?: (value: any) => void;
   isLoading?: boolean;
@@ -42,6 +45,9 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
     stream,
     graphId,
     actionRequest,
+    actionRequestKey: externalActionRequestKey,
+    actionRequestSubmitted,
+    onActionRequestSubmitted,
     reviewConfig,
     onResume,
     isLoading,
@@ -53,6 +59,27 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
     const [expandedArgs, setExpandedArgs] = useState<Record<string, boolean>>(
       {}
     );
+    const fallbackActionRequestKey = useMemo(() => {
+      if (!actionRequest) return null;
+      return `${toolCall.id}:${actionRequest.name}:${JSON.stringify(
+        actionRequest.args
+      )}`;
+    }, [actionRequest, toolCall.id]);
+    const actionRequestKey =
+      externalActionRequestKey ?? fallbackActionRequestKey;
+    const [submittedActionRequestKey, setSubmittedActionRequestKey] = useState<
+      string | null
+    >(null);
+
+    useEffect(() => {
+      if (!actionRequestKey) {
+        setSubmittedActionRequestKey(null);
+        return;
+      }
+      setSubmittedActionRequestKey((current) =>
+        current && current !== actionRequestKey ? null : current
+      );
+    }, [actionRequestKey]);
 
     // Generative UI: expand to show it.
     useEffect(() => {
@@ -136,6 +163,12 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
     }, []);
 
     const hasContent = result || Object.keys(args).length > 0;
+    const isActionRequestSubmitted =
+      actionRequestSubmitted ?? submittedActionRequestKey === actionRequestKey;
+    const showApproval =
+      actionRequest &&
+      onResume &&
+      (!actionRequestKey || !isActionRequestSubmitted);
 
     return (
       <div
@@ -187,7 +220,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                   meta={{ status, args, result: result ?? "No Result Yet" }}
                 />
               </div>
-            ) : actionRequest && onResume ? (
+            ) : showApproval ? (
               // Show tool approval UI when there's an action request but no GenUI
               <div className="mt-4">
                 <ToolApprovalInterrupt
@@ -195,6 +228,13 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                   reviewConfig={reviewConfig}
                   onResume={onResume}
                   isLoading={isLoading}
+                  onSubmitted={() => {
+                    setSubmittedActionRequestKey(actionRequestKey);
+                    if (actionRequestKey) {
+                      onActionRequestSubmitted?.(actionRequestKey);
+                    }
+                    setIsExpanded(false);
+                  }}
                 />
               </div>
             ) : (

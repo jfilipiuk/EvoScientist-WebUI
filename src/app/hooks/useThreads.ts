@@ -104,22 +104,9 @@ export function useThreads(props: {
             const messages: any[] = Array.isArray(values.messages)
               ? values.messages
               : [];
-            const firstHumanMessage = messages.find(
-              (m: any) => m.type === "human"
-            );
-            if (firstHumanMessage?.content) {
-              const content =
-                typeof firstHumanMessage.content === "string"
-                  ? firstHumanMessage.content
-                  : firstHumanMessage.content[0]?.text || "";
-              title = content.slice(0, 50) + (content.length > 50 ? "..." : "");
-            }
-            // Preview = the first AI message that actually has text. Agentic
-            // threads often open with tool-call-only AI messages (empty
-            // content), so picking the literal first AI message would leave the
-            // row blank (looking like an "empty" thread). Also join all text
-            // parts rather than just content[0].
-            const aiText = (content: any): string => {
+            // Extract readable text from a string OR an array of content blocks
+            // (the latter is common for multi-part / attachment messages).
+            const textOf = (content: any): string => {
               if (typeof content === "string") return content;
               if (Array.isArray(content))
                 return content
@@ -127,13 +114,34 @@ export function useThreads(props: {
                   .join("");
               return "";
             };
+            const firstHumanMessage = messages.find(
+              (m: any) => m.type === "human"
+            );
+            const humanText = textOf(firstHumanMessage?.content).trim();
+            if (humanText) {
+              title =
+                humanText.slice(0, 50) + (humanText.length > 50 ? "..." : "");
+            }
+            // Preview = the first AI message that actually has text. Agentic
+            // threads often open with tool-call-only AI messages (empty
+            // content), so picking the literal first AI message would leave the
+            // row blank (looking like an "empty" thread). Also join all text
+            // parts rather than just content[0].
             for (const m of messages) {
               if (m?.type !== "ai") continue;
-              const t = aiText(m.content).trim();
+              const t = textOf(m.content).trim();
               if (t) {
                 description = t.slice(0, 100);
                 break;
               }
+            }
+            // If the first human message yielded no text (odd/attachment-only
+            // shape), fall back to the AI preview so the row isn't an opaque
+            // "Untitled Thread".
+            if (title === "Untitled Thread" && description) {
+              title =
+                description.slice(0, 50) +
+                (description.length > 50 ? "..." : "");
             }
           }
         } catch {

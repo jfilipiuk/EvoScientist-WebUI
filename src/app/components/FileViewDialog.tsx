@@ -11,6 +11,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { toast } from "sonner";
 import { MarkdownContent } from "@/app/components/MarkdownContent";
+import { copyText } from "@/lib/clipboard";
 import type { FileItem } from "@/app/types/types";
 import useSWRMutation from "swr/mutation";
 
@@ -93,7 +94,7 @@ export const FileViewDialog = React.memo<{
 
   const handleCopy = useCallback(() => {
     if (fileContent) {
-      navigator.clipboard.writeText(fileContent);
+      void copyText(fileContent);
     }
   }, [fileContent]);
 

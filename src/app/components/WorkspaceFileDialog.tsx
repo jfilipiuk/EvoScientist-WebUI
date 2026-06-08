@@ -1,7 +1,15 @@
 "use client";
 
-import React, { useMemo, useState, useEffect } from "react";
-import { Download, Loader2, FileText } from "lucide-react";
+import React, { useMemo, useState, useEffect, useRef } from "react";
+import {
+  Download,
+  Loader2,
+  FileText,
+  Pencil,
+  Save,
+  Trash2,
+  Eye,
+} from "lucide-react";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Button } from "@/components/ui/button";
@@ -85,10 +93,29 @@ export const WorkspaceFileDialog = React.memo<{
   /** Byte size from the listing — used to gate inline text preview. */
   size?: number;
   onClose: () => void;
-}>(({ path, size, onClose }) => {
+  /** Called after a successful save or delete so the listing can refresh. */
+  onChanged?: () => void;
+}>(({ path, size, onClose, onChanged }) => {
   const [content, setContent] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Edit / save / delete state.
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // Suppress state updates after unmount — closing the inspector panel mid
+  // save/delete unmounts this dialog while a request is still in flight.
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const name = path ? path.split("/").pop() || path : "";
   const ext = useMemo(
@@ -98,6 +125,7 @@ export const WorkspaceFileDialog = React.memo<{
   const kind = kindOf(ext);
   const tooBigForText =
     kind === "text" && size != null && size > MAX_INLINE_TEXT_BYTES;
+  const editable = kind === "text" && !tooBigForText;
 
   useEffect(() => {
     if (!path || kind !== "text" || tooBigForText) {
@@ -107,6 +135,8 @@ export const WorkspaceFileDialog = React.memo<{
     let cancelled = false;
     setLoading(true);
     setError(null);
+    setEditing(false);
+    setActionError(null);
     fetch(workspaceFileUrl(path))
       .then(async (res) => {
         if (!res.ok) {
@@ -134,17 +164,84 @@ export const WorkspaceFileDialog = React.memo<{
   const isMarkdown = ext === "md" || ext === "markdown";
   const language = LANGUAGE_MAP[ext] || "text";
 
+  const dirty = editing && content !== null && draft !== content;
+  const confirmDiscard = () =>
+    !dirty || window.confirm("Discard your unsaved changes?");
+
+  const requestClose = () => {
+    if (confirmDiscard()) onClose();
+  };
+
+  const startEdit = () => {
+    setDraft(content ?? "");
+    setActionError(null);
+    setEditing(true);
+  };
+
+  const save = async () => {
+    setSaving(true);
+    setActionError(null);
+    try {
+      const res = await fetch(workspaceFileUrl(path), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: draft }),
+      });
+      const data = await res.json().catch(() => null);
+      if (!res.ok) throw new Error(data?.error || "Failed to save.");
+      if (!mountedRef.current) return;
+      setContent(draft);
+      setEditing(false);
+      onChanged?.();
+    } catch (e) {
+      if (mountedRef.current) {
+        setActionError(e instanceof Error ? e.message : "Failed to save.");
+      }
+    } finally {
+      if (mountedRef.current) setSaving(false);
+    }
+  };
+
+  const remove = async () => {
+    if (
+      !window.confirm(
+        `Delete "${name}"? This permanently removes it from the workspace and can't be undone.`
+      )
+    ) {
+      return;
+    }
+    setDeleting(true);
+    setActionError(null);
+    try {
+      const res = await fetch(workspaceFileUrl(path), { method: "DELETE" });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        throw new Error(data?.error || "Failed to delete.");
+      }
+      onChanged?.();
+      onClose();
+    } catch (e) {
+      if (mountedRef.current) {
+        setActionError(e instanceof Error ? e.message : "Failed to delete.");
+      }
+    } finally {
+      if (mountedRef.current) setDeleting(false);
+    }
+  };
+
   return (
     <Dialog
       open={true}
-      onOpenChange={onClose}
+      onOpenChange={(open) => {
+        if (!open) requestClose();
+      }}
     >
       <DialogContent
         aria-describedby={undefined}
         className="flex h-[80vh] max-h-[80vh] min-w-[60vw] flex-col p-6"
       >
         <DialogTitle className="sr-only">{path}</DialogTitle>
-        <div className="mb-4 flex items-center justify-between border-b border-border pb-4">
+        <div className="mb-4 flex items-center justify-between gap-3 border-b border-border pb-4">
           <div className="flex min-w-0 items-center gap-2">
             <FileText className="h-5 w-5 shrink-0 text-[var(--color-text-tertiary)]" />
             <span className="overflow-hidden text-ellipsis whitespace-nowrap text-base font-medium text-primary">
@@ -152,30 +249,123 @@ export const WorkspaceFileDialog = React.memo<{
             </span>
           </div>
           <div className="flex shrink-0 items-center gap-1">
-            <a
-              href={workspaceFileUrl(path, true)}
-              download={name}
-            >
-              <Button
-                variant="ghost"
-                size="sm"
-                className="h-8 px-2"
-                asChild
-              >
-                <span>
-                  <Download
+            {editing ? (
+              <>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2"
+                  onClick={() => {
+                    if (confirmDiscard()) setEditing(false);
+                  }}
+                  disabled={saving}
+                >
+                  <Eye
                     size={16}
                     className="mr-1"
                   />
-                  Download
-                </span>
-              </Button>
-            </a>
+                  Cancel
+                </Button>
+                <Button
+                  size="sm"
+                  className="h-8 bg-[var(--brand-solid)] px-3 text-[var(--brand-foreground)] hover:opacity-90"
+                  onClick={save}
+                  disabled={saving || !dirty}
+                >
+                  {saving ? (
+                    <Loader2
+                      size={16}
+                      className="mr-1 animate-spin"
+                    />
+                  ) : (
+                    <Save
+                      size={16}
+                      className="mr-1"
+                    />
+                  )}
+                  {saving ? "Saving…" : "Save"}
+                </Button>
+              </>
+            ) : (
+              <>
+                {editable && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2"
+                    onClick={startEdit}
+                    disabled={loading || content === null}
+                    aria-label="Edit file"
+                  >
+                    <Pencil
+                      size={16}
+                      className="mr-1"
+                    />
+                    Edit
+                  </Button>
+                )}
+                <a
+                  href={workspaceFileUrl(path, true)}
+                  download={name}
+                >
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 px-2"
+                    asChild
+                  >
+                    <span>
+                      <Download
+                        size={16}
+                        className="mr-1"
+                      />
+                      Download
+                    </span>
+                  </Button>
+                </a>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 px-2 text-muted-foreground hover:text-destructive"
+                  onClick={remove}
+                  disabled={deleting}
+                  aria-label="Delete file"
+                  title="Delete file"
+                >
+                  {deleting ? (
+                    <Loader2
+                      size={16}
+                      className="animate-spin"
+                    />
+                  ) : (
+                    <Trash2 size={16} />
+                  )}
+                </Button>
+              </>
+            )}
           </div>
         </div>
 
+        {actionError && (
+          <p
+            role="alert"
+            className="mb-2 text-sm text-destructive"
+          >
+            {actionError}
+          </p>
+        )}
+
         <div className="min-h-0 flex-1 overflow-hidden">
-          {kind === "image" ? (
+          {editing ? (
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              spellCheck={false}
+              aria-label="File content"
+              className="h-full w-full resize-none rounded-md border border-border bg-background p-4 font-mono text-sm leading-relaxed text-foreground outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+              placeholder="File is empty…"
+            />
+          ) : kind === "image" ? (
             <ScrollArea className="bg-surface h-full rounded-md">
               <div className="flex items-center justify-center p-4">
                 <img

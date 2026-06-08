@@ -8,7 +8,14 @@ import { ConfigDialog } from "@/app/components/ConfigDialog";
 import { Button } from "@/components/ui/button";
 import { Assistant } from "@langchain/langgraph-sdk";
 import { ClientProvider, useClient } from "@/providers/ClientProvider";
-import { Settings, SquarePen, PanelLeft, PanelLeftClose } from "lucide-react";
+import {
+  Settings,
+  SquarePen,
+  PanelLeft,
+  PanelLeftClose,
+  PanelRight,
+  PanelRightClose,
+} from "lucide-react";
 import {
   ResizableHandle,
   ResizablePanel,
@@ -22,6 +29,7 @@ import { MemoryPanel } from "@/app/components/MemoryPanel";
 import { ThemeToggle } from "@/app/components/ThemeToggle";
 import { BetaBadge } from "@/app/components/BetaBadge";
 import { HealthIndicator } from "@/app/components/HealthIndicator";
+import { InspectorPanel } from "@/app/components/InspectorPanel";
 
 interface HomePageInnerProps {
   config: DeploymentConfig;
@@ -40,6 +48,7 @@ function HomePageInner({
   const [, setThreadId] = useQueryState("threadId");
   const [sidebar, setSidebar] = useQueryState("sidebar");
   const [view, setView] = useQueryState("view");
+  const [inspector, setInspector] = useQueryState("inspector");
 
   const [mutateThreads, setMutateThreads] = useState<(() => void) | null>(null);
   const [interruptCount, setInterruptCount] = useState(0);
@@ -158,10 +167,17 @@ function HomePageInner({
                 className="size-6 shrink-0"
                 priority
               />
-              <h1 className="truncate text-base font-semibold sm:text-lg">
-                EvoScientist
-              </h1>
-              <BetaBadge />
+              {/* Show the wordmark only when the thread sidebar is open (it
+                  titles the panel). When collapsed, keep just the logo + the
+                  toggle / new-chat icons for a compact header. */}
+              {sidebar && (
+                <>
+                  <h1 className="truncate text-base font-semibold sm:text-lg">
+                    EvoScientist
+                  </h1>
+                  <BetaBadge />
+                </>
+              )}
             </div>
             <div className="flex items-center gap-0.5">
               <Button
@@ -208,18 +224,37 @@ function HomePageInner({
             <HealthIndicator deploymentUrl={config.deploymentUrl} />
             <ThemeToggle />
             <Button
-              variant="outline"
-              size="sm"
+              variant="ghost"
+              size="icon"
+              onClick={() => setInspector(inspector ? null : "1")}
+              aria-label={inspector ? "Hide workspace" : "Show workspace"}
+              title={inspector ? "Hide workspace" : "Show workspace"}
+              className="size-8"
+            >
+              {inspector ? (
+                <PanelRightClose
+                  className="size-5"
+                  aria-hidden="true"
+                />
+              ) : (
+                <PanelRight
+                  className="size-5"
+                  aria-hidden="true"
+                />
+              )}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
               onClick={() => setConfigDialogOpen(true)}
               aria-label="Settings"
               title="Settings"
-              className="h-8 px-2 sm:px-2.5"
+              className="size-8"
             >
               <Settings
-                className="h-4 w-4 sm:mr-2"
+                className="size-5"
                 aria-hidden="true"
               />
-              <span className="hidden sm:inline">Settings</span>
             </Button>
           </div>
         </header>
@@ -247,6 +282,22 @@ function HomePageInner({
                   onMutateReady={(fn) => setMutateThreads(() => fn)}
                   onInterruptCountChange={setInterruptCount}
                 />
+              </aside>
+            </div>
+          )}
+          {inspector && isDesktopLayout === false && (
+            <div className="absolute inset-0 z-40 flex justify-end md:hidden">
+              <button
+                type="button"
+                aria-label="Close workspace"
+                className="absolute inset-0 bg-black/40"
+                onClick={() => setInspector(null)}
+              />
+              <aside
+                aria-label="Workspace"
+                className="relative z-10 h-full w-[min(22rem,calc(100vw-2.25rem))] bg-background shadow-xl"
+              >
+                <InspectorPanel onClose={() => setInspector(null)} />
               </aside>
             </div>
           )}
@@ -293,6 +344,21 @@ function HomePageInner({
                 </ChatProvider>
               )}
             </ResizablePanel>
+
+            {inspector && isDesktopLayout && (
+              <>
+                <ResizableHandle />
+                <ResizablePanel
+                  id="inspector"
+                  order={3}
+                  defaultSize={26}
+                  minSize={20}
+                  className="relative min-w-[300px]"
+                >
+                  <InspectorPanel onClose={() => setInspector(null)} />
+                </ResizablePanel>
+              </>
+            )}
           </ResizablePanelGroup>
         </div>
       </div>
