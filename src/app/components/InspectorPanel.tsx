@@ -45,7 +45,10 @@ export function InspectorPanel({ onClose }: InspectorPanelProps) {
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <FolderOpen className="size-4 text-[var(--brand)]" />
+            <FolderOpen
+              className="size-4 text-[var(--brand)]"
+              aria-hidden="true"
+            />
             Workspace
           </button>
           <button
@@ -60,7 +63,10 @@ export function InspectorPanel({ onClose }: InspectorPanelProps) {
                 : "text-muted-foreground hover:text-foreground"
             )}
           >
-            <Bot className="size-4 text-[var(--brand)]" />
+            <Bot
+              className="size-4 text-[var(--brand)]"
+              aria-hidden="true"
+            />
             Agents
           </button>
         </div>
@@ -72,7 +78,10 @@ export function InspectorPanel({ onClose }: InspectorPanelProps) {
           aria-label="Close inspector"
           title="Close"
         >
-          <X className="size-4" />
+          <X
+            className="size-4"
+            aria-hidden="true"
+          />
         </Button>
       </div>
       {tab === "agents" ? (

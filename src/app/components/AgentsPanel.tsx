@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  ArrowUp,
   Bot,
   ChevronDown,
   ChevronRight,
@@ -21,47 +22,40 @@ import {
   normalizeAsyncStatus,
 } from "@/lib/asyncAgents";
 import { useAsyncAgents } from "@/app/hooks/useAsyncAgents";
-
-interface Step {
-  kind: "ai" | "tool";
-  text: string;
-  tools: string[];
-}
+import {
+  messagesToSubAgentSteps,
+  type SubAgentStep,
+} from "@/lib/subAgentActivity";
+import { SubAgentSteps } from "@/app/components/SubAgentSteps";
 
 interface TaskDetail {
   loading: boolean;
   error: string | null;
   prompt: string;
-  steps: Step[];
+  steps: SubAgentStep[];
 }
 
-/** Turn a task thread's messages into a compact prompt + step list. */
-function buildDetail(messages: unknown[]): { prompt: string; steps: Step[] } {
+/** Turn a task thread's persisted messages into a prompt + renderable steps
+ *  (tool calls with args + paired results + markdown text, same as the main
+ *  agent — reused via {@link SubAgentSteps}). */
+function buildDetail(messages: unknown[]): {
+  prompt: string;
+  steps: SubAgentStep[];
+} {
   let prompt = "";
-  const steps: Step[] = [];
   for (const raw of messages) {
-    const m = raw as {
-      type?: string;
-      content?: unknown;
-      tool_calls?: { name?: string }[];
-    };
-    const text = extractStringFromMessageContent(
-      m as Parameters<typeof extractStringFromMessageContent>[0]
-    ).trim();
+    const m = raw as { type?: string; content?: unknown };
     if (m.type === "human") {
-      if (!prompt && text) prompt = text;
-      continue;
-    }
-    if (m.type === "ai") {
-      const tools = (m.tool_calls ?? [])
-        .map((tc) => tc.name ?? "")
-        .filter(Boolean);
-      if (text || tools.length) steps.push({ kind: "ai", text, tools });
-    } else if (m.type === "tool") {
-      steps.push({ kind: "tool", text, tools: [] });
+      const text = extractStringFromMessageContent(
+        m as Parameters<typeof extractStringFromMessageContent>[0]
+      ).trim();
+      if (text) {
+        prompt = text;
+        break;
+      }
     }
   }
-  return { prompt, steps };
+  return { prompt, steps: messagesToSubAgentSteps(messages) };
 }
 
 function StatusDot({ status }: { status: string }) {
@@ -98,6 +92,21 @@ export function AgentsPanel() {
   const [now, setNow] = useState(() => Date.now());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, TaskDetail>>({});
+  const terminalDetailSignaturesRef = useRef(new Map<string, string>());
+  // Hidden power-user feature: a tiny composer per expanded task that sends a
+  // message straight to that sub-agent's own thread. Note this is a SIDE channel
+  // — the reply lands in the sub-agent's thread (shown here), the main agent
+  // doesn't see it (see CLAUDE.md §3 Agents board: no auto loop-back to parent).
+  const [chatInput, setChatInput] = useState<Record<string, string>>({});
+  const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
+  const [chatError, setChatError] = useState<Record<string, string | null>>({});
+  const mountedRef = useRef(true);
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   // Smooth elapsed-time ticker for running tasks.
   useEffect(() => {
@@ -105,12 +114,56 @@ export function AgentsPanel() {
     return () => clearInterval(id);
   }, []);
 
+  // Send one message to a sub-agent's own thread and fold its reply back into the
+  // steps. Uses runs.wait (blocks until the run finishes) — no attachments, no
+  // approvals: a minimal "poke the worker" box. Disabled while a run is active.
+  const sendToAgent = async (task: EnrichedAsyncTask) => {
+    const text = (chatInput[task.task_id] ?? "").trim();
+    if (!text || chatBusy[task.task_id]) return;
+    setChatBusy((b) => ({ ...b, [task.task_id]: true }));
+    setChatError((e) => ({ ...e, [task.task_id]: null }));
+    try {
+      const values = (await client.runs.wait(task.thread_id, task.agent_name, {
+        input: { messages: [{ type: "human", content: text }] },
+      })) as { messages?: unknown[] } | null;
+      if (!mountedRef.current) return;
+      setChatInput((i) => ({ ...i, [task.task_id]: "" }));
+      const { prompt, steps } = buildDetail(values?.messages ?? []);
+      setDetails((prev) => ({
+        ...prev,
+        [task.task_id]: { loading: false, error: null, prompt, steps },
+      }));
+    } catch {
+      if (!mountedRef.current) return;
+      setChatError((e) => ({
+        ...e,
+        [task.task_id]: "Couldn't reach this agent — try again.",
+      }));
+    } finally {
+      if (mountedRef.current) {
+        setChatBusy((b) => ({ ...b, [task.task_id]: false }));
+      }
+    }
+  };
+
   // Fetch the expanded task's own thread for its steps; re-fetch whenever the
   // task list refreshes (so a running task's steps stay live).
   useEffect(() => {
     if (!expandedId) return;
     const task = tasks.find((t) => t.task_id === expandedId);
     if (!task) return;
+    const running = normalizeAsyncStatus(task.liveStatus) === "running";
+    const terminalSignature = [
+      task.run_id,
+      task.last_updated_at,
+      task.endedAt,
+    ].join(":");
+    if (
+      !running &&
+      terminalDetailSignaturesRef.current.get(expandedId) === terminalSignature
+    ) {
+      return;
+    }
     let cancelled = false;
     setDetails((prev) => ({
       ...prev,
@@ -128,12 +181,19 @@ export function AgentsPanel() {
         };
         if (cancelled) return;
         const { prompt, steps } = buildDetail(state.values?.messages ?? []);
+        if (!running) {
+          terminalDetailSignaturesRef.current.set(
+            expandedId,
+            terminalSignature
+          );
+        }
         setDetails((prev) => ({
           ...prev,
           [expandedId]: { loading: false, error: null, prompt, steps },
         }));
       } catch {
         if (cancelled) return;
+        terminalDetailSignaturesRef.current.delete(expandedId);
         setDetails((prev) => ({
           ...prev,
           [expandedId]: {
@@ -273,7 +333,7 @@ export function AgentsPanel() {
                         </div>
                       )}
                       <div>
-                        <p className="font-semibold text-foreground">
+                        <p className="mb-1 font-semibold text-foreground">
                           Steps{" "}
                           <span className="font-normal text-muted-foreground">
                             ({detail.steps.length})
@@ -282,45 +342,96 @@ export function AgentsPanel() {
                         {detail.steps.length === 0 ? (
                           <p className="text-muted-foreground">No steps yet.</p>
                         ) : (
-                          <ol className="mt-1 flex flex-col gap-1.5">
-                            {detail.steps.slice(-40).map((step, i) => (
-                              <li
-                                key={i}
-                                className="flex gap-2"
-                              >
-                                <span
-                                  className={cn(
-                                    "mt-1 size-1.5 shrink-0 rounded-full",
-                                    step.kind === "tool"
-                                      ? "bg-[var(--brand)]"
-                                      : "bg-muted-foreground"
-                                  )}
-                                  aria-hidden="true"
-                                />
-                                <span className="min-w-0 flex-1">
-                                  {step.tools.length > 0 && (
-                                    <span className="font-mono text-[var(--brand)]">
-                                      {step.tools.join(", ")}
-                                    </span>
-                                  )}
-                                  {step.text && (
-                                    <span
-                                      className={cn(
-                                        "block whitespace-pre-wrap break-words text-muted-foreground",
-                                        step.tools.length > 0 && "mt-0.5"
-                                      )}
-                                    >
-                                      {step.text.length > 240
-                                        ? step.text.slice(0, 240) + "…"
-                                        : step.text}
-                                    </span>
-                                  )}
-                                </span>
-                              </li>
-                            ))}
-                          </ol>
+                          <SubAgentSteps
+                            steps={detail.steps}
+                            compact
+                          />
                         )}
                       </div>
+
+                      {(() => {
+                        const running =
+                          normalizeAsyncStatus(task.liveStatus) === "running";
+                        const busy = !!chatBusy[task.task_id];
+                        return (
+                          <div className="mt-1 border-t border-border pt-2">
+                            <p className="mb-1 text-[11px] text-muted-foreground">
+                              Direct follow-up · Main chat is not notified
+                            </p>
+                            <form
+                              onSubmit={(e) => {
+                                e.preventDefault();
+                                sendToAgent(task);
+                              }}
+                              className="flex items-center gap-1.5"
+                            >
+                              <input
+                                type="text"
+                                name={`agent-message-${task.task_id}`}
+                                autoComplete="off"
+                                value={chatInput[task.task_id] ?? ""}
+                                onChange={(e) =>
+                                  setChatInput((i) => ({
+                                    ...i,
+                                    [task.task_id]: e.target.value,
+                                  }))
+                                }
+                                onKeyDown={(e) => {
+                                  // Don't submit while an IME is composing (e.g.
+                                  // Enter to pick a Chinese candidate).
+                                  if (
+                                    e.key === "Enter" &&
+                                    (e.nativeEvent.isComposing ||
+                                      e.keyCode === 229)
+                                  ) {
+                                    e.preventDefault();
+                                  }
+                                }}
+                                disabled={running || busy}
+                                placeholder={
+                                  running
+                                    ? "Agent is working…"
+                                    : "Send a direct follow-up…"
+                                }
+                                aria-label="Message this agent"
+                                className="min-w-0 flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+                              />
+                              <button
+                                type="submit"
+                                disabled={
+                                  running ||
+                                  busy ||
+                                  !(chatInput[task.task_id] ?? "").trim()
+                                }
+                                aria-label="Send"
+                                title="Send to this agent"
+                                className="inline-flex size-7 shrink-0 items-center justify-center rounded-md bg-[var(--brand-solid)] text-[var(--brand-foreground)] transition-opacity hover:opacity-90 focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                {busy ? (
+                                  <Loader2
+                                    className="size-3.5 animate-spin"
+                                    aria-hidden="true"
+                                  />
+                                ) : (
+                                  <ArrowUp
+                                    className="size-3.5"
+                                    aria-hidden="true"
+                                  />
+                                )}
+                              </button>
+                            </form>
+                            {chatError[task.task_id] && (
+                              <p
+                                className="mt-1 text-[var(--color-error)]"
+                                role="status"
+                                aria-live="polite"
+                              >
+                                {chatError[task.task_id]}
+                              </p>
+                            )}
+                          </div>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

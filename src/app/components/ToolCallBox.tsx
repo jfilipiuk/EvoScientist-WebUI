@@ -36,6 +36,7 @@ interface ToolCallBoxProps {
   onResume?: (value: any) => void;
   isLoading?: boolean;
   autoApprove?: boolean;
+  compact?: boolean;
 }
 
 export const ToolCallBox = React.memo<ToolCallBoxProps>(
@@ -52,6 +53,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
     onResume,
     isLoading,
     autoApprove,
+    compact = false,
   }) => {
     const [isExpanded, setIsExpanded] = useState(
       () => !!uiComponent || (!!actionRequest && !autoApprove)
@@ -174,6 +176,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
       <div
         className={cn(
           "w-full overflow-hidden rounded-lg border-none shadow-none outline-none transition-colors duration-200 focus-within:ring-2 focus-within:ring-ring hover:bg-accent",
+          compact && "rounded-md",
           isExpanded && hasContent && "bg-accent"
         )}
       >
@@ -182,14 +185,20 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
           size="sm"
           onClick={toggleExpanded}
           className={cn(
-            "flex w-full items-center justify-between gap-2 border-none px-2 py-2 text-left shadow-none outline-none disabled:cursor-default"
+            "flex w-full items-center justify-between gap-2 border-none px-2 py-2 text-left shadow-none outline-none disabled:cursor-default",
+            compact && "h-auto min-h-8 py-1.5"
           )}
           disabled={!hasContent}
         >
           <div className="flex w-full items-center justify-between gap-2">
             <div className="flex items-center gap-2">
               {statusIcon}
-              <span className="text-[15px] font-medium tracking-[-0.6px] text-foreground">
+              <span
+                className={cn(
+                  "text-[15px] font-medium tracking-[-0.6px] text-foreground",
+                  compact && "text-xs tracking-normal"
+                )}
+              >
                 {name}
               </span>
             </div>
@@ -209,7 +218,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
         </Button>
 
         {isExpanded && hasContent && (
-          <div className="px-4 pb-4">
+          <div className={cn("px-4 pb-4", compact && "px-2 pb-2")}>
             {uiComponent && stream && graphId ? (
               <div className="mt-4">
                 <LoadExternalComponent
@@ -240,7 +249,7 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
             ) : (
               <>
                 {Object.keys(args).length > 0 && (
-                  <div className="mt-4">
+                  <div className={cn("mt-4", compact && "mt-2")}>
                     <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Arguments
                     </h4>
@@ -269,8 +278,18 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                             )}
                           </button>
                           {expandedArgs[key] && (
-                            <div className="border-t border-border bg-muted/20 p-2">
-                              <pre className="m-0 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs leading-6 text-foreground">
+                            <div
+                              className={cn(
+                                "border-t border-border bg-muted/20 p-2",
+                                compact && "p-1.5"
+                              )}
+                            >
+                              <pre
+                                className={cn(
+                                  "m-0 overflow-x-auto whitespace-pre-wrap break-all font-mono text-xs leading-6 text-foreground",
+                                  compact && "text-[11px] leading-5"
+                                )}
+                              >
                                 {typeof value === "string"
                                   ? value
                                   : JSON.stringify(value, null, 2)}
@@ -283,11 +302,16 @@ export const ToolCallBox = React.memo<ToolCallBoxProps>(
                   </div>
                 )}
                 {result && (
-                  <div className="mt-4">
+                  <div className={cn("mt-4", compact && "mt-2")}>
                     <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                       Result
                     </h4>
-                    <pre className="m-0 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-muted/40 p-2 font-mono text-xs leading-7 text-foreground">
+                    <pre
+                      className={cn(
+                        "m-0 overflow-x-auto whitespace-pre-wrap break-all rounded-sm border border-border bg-muted/40 p-2 font-mono text-xs leading-7 text-foreground",
+                        compact && "p-1.5 text-[11px] leading-5"
+                      )}
+                    >
                       {typeof result === "string"
                         ? result
                         : JSON.stringify(result, null, 2)}
