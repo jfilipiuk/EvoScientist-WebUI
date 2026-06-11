@@ -1,16 +1,77 @@
 "use client";
 
-import React from "react";
+import React, { useCallback, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { Check, Copy } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { copyText } from "@/lib/clipboard";
 
 interface MarkdownContentProps {
   content: string;
   className?: string;
 }
+
+interface CodeBlockProps {
+  language: string;
+  value: string;
+}
+
+const CodeBlock = React.memo<CodeBlockProps>(({ language, value }) => {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(async () => {
+    if (await copyText(value)) {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } else {
+      toast.error("Couldn't copy to clipboard.");
+    }
+  }, [value]);
+
+  return (
+    <div className="group relative max-w-full">
+      <button
+        type="button"
+        onClick={handleCopy}
+        aria-label={copied ? "Copied" : "Copy code"}
+        className="absolute right-2 top-2 z-10 rounded-md border border-border bg-surface/80 p-1.5 text-[var(--color-text-tertiary)] opacity-0 backdrop-blur-sm transition-opacity hover:text-[var(--color-text-primary)] focus-visible:opacity-100 group-hover:opacity-100"
+      >
+        {copied ? (
+          <Check className="h-3.5 w-3.5" />
+        ) : (
+          <Copy className="h-3.5 w-3.5" />
+        )}
+      </button>
+      <SyntaxHighlighter
+        style={oneDark}
+        language={language}
+        PreTag="div"
+        className="max-w-full rounded-md text-sm"
+        wrapLines={true}
+        wrapLongLines={true}
+        lineProps={{
+          style: {
+            wordBreak: "break-all",
+            whiteSpace: "pre-wrap",
+            overflowWrap: "break-word",
+          },
+        }}
+        customStyle={{
+          margin: 0,
+          maxWidth: "100%",
+          overflowX: "auto",
+          fontSize: "0.875rem",
+        }}
+      >
+        {value}
+      </SyntaxHighlighter>
+    </div>
+  );
+});
+CodeBlock.displayName = "CodeBlock";
 
 export const MarkdownContent = React.memo<MarkdownContentProps>(
   ({ content, className = "" }) => {
@@ -36,29 +97,10 @@ export const MarkdownContent = React.memo<MarkdownContentProps>(
             }) {
               const match = /language-(\w+)/.exec(className || "");
               return !inline && match ? (
-                <SyntaxHighlighter
-                  style={oneDark}
+                <CodeBlock
                   language={match[1]}
-                  PreTag="div"
-                  className="max-w-full rounded-md text-sm"
-                  wrapLines={true}
-                  wrapLongLines={true}
-                  lineProps={{
-                    style: {
-                      wordBreak: "break-all",
-                      whiteSpace: "pre-wrap",
-                      overflowWrap: "break-word",
-                    },
-                  }}
-                  customStyle={{
-                    margin: 0,
-                    maxWidth: "100%",
-                    overflowX: "auto",
-                    fontSize: "0.875rem",
-                  }}
-                >
-                  {String(children).replace(/\n$/, "")}
-                </SyntaxHighlighter>
+                  value={String(children).replace(/\n$/, "")}
+                />
               ) : (
                 <code
                   className="bg-surface rounded-sm px-1 py-0.5 font-mono text-[0.9em]"
