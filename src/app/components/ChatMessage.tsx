@@ -192,11 +192,25 @@ export const ChatMessage = React.memo<ChatMessageProps>(
 
     const [thinkingOpen, setThinkingOpen] = useState(false);
     const [copied, setCopied] = useState(false);
+    const copyResetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+      undefined
+    );
+    useEffect(
+      () => () => {
+        if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+      },
+      []
+    );
+    useEffect(() => {
+      setCopied(false);
+      if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    }, [messageContent]);
     const handleCopy = useCallback(async () => {
       if (!messageContent) return;
       if (await copyText(messageContent)) {
         setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+        if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+        copyResetTimer.current = setTimeout(() => setCopied(false), 2000);
       } else {
         toast.error("Couldn't copy to clipboard.");
       }
@@ -312,7 +326,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                 type="button"
                 onClick={handleCopy}
                 aria-label={copied ? "Copied" : "Copy message"}
-                className="inline-flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="inline-flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {copied ? (
                   <Check
@@ -334,7 +348,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                 type="button"
                 onClick={handleCopy}
                 aria-label={copied ? "Copied" : "Copy message"}
-                className="inline-flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="inline-flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 {copied ? (
                   <Check
@@ -352,7 +366,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                 type="button"
                 onClick={() => onEditMessage?.(messageContent)}
                 aria-label="Edit message"
-                className="inline-flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+                className="inline-flex items-center rounded p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <Pencil
                   className="h-4 w-4"
@@ -430,7 +444,7 @@ export const ChatMessage = React.memo<ChatMessageProps>(
                   </div>
                   {isSubAgentExpanded(subAgent.id) && (
                     <div className="w-full max-w-full">
-                      <div className="bg-surface border-border-light rounded-md border p-4">
+                      <div className="border-border-light rounded-md border bg-[var(--color-surface)] p-4">
                         <h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-[var(--color-text-secondary)]">
                           Input
                         </h4>

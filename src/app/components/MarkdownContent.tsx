@@ -42,13 +42,21 @@ export const MarkdownContent = React.memo<MarkdownContentProps>(
               const match = /language-(\w+)/.exec(className || "");
               const code = String(children).replace(/\n$/, "");
               if (!inline && match?.[1] === "mermaid") {
-                return <MermaidDiagram code={code} isStreaming={isStreaming} />;
+                return (
+                  <MermaidDiagram
+                    code={code}
+                    isStreaming={isStreaming}
+                  />
+                );
               }
               return !inline && match ? (
-                <CodeBlock language={match[1]} value={code} />
+                <CodeBlock
+                  language={match[1]}
+                  value={code}
+                />
               ) : (
                 <code
-                  className="bg-surface rounded-sm px-1 py-0.5 font-mono text-[0.9em]"
+                  className="rounded-sm bg-[var(--color-surface)] px-1 py-0.5 font-mono text-[0.9em]"
                   {...props}
                 >
                   {children}
@@ -105,7 +113,7 @@ export const MarkdownContent = React.memo<MarkdownContentProps>(
               return (
                 <details
                   {...props}
-                  className="my-4 rounded-md border border-border bg-surface/50 px-3 py-2 [&[open]>summary]:mb-2"
+                  className="my-4 rounded-md border border-border bg-[var(--color-surface)] px-3 py-2 [&[open]>summary]:mb-2"
                 >
                   {children}
                 </details>
@@ -124,7 +132,7 @@ export const MarkdownContent = React.memo<MarkdownContentProps>(
             table({ children }: { children?: React.ReactNode }) {
               return (
                 <div className="my-4 overflow-x-auto">
-                  <table className="[&_th]:bg-surface w-full border-collapse [&_td]:border [&_td]:border-border [&_td]:p-2 [&_th]:border [&_th]:border-border [&_th]:p-2 [&_th]:text-left [&_th]:font-semibold">
+                  <table className="w-full border-collapse [&_td]:border [&_td]:border-border [&_td]:p-2 [&_th]:border [&_th]:border-border [&_th]:bg-[var(--color-surface)] [&_th]:p-2 [&_th]:text-left [&_th]:font-semibold">
                     {children}
                   </table>
                 </div>

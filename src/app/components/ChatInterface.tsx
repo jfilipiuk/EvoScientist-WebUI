@@ -750,9 +750,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                 // The selector call only survives the filter above while the run is
                 // actively selecting (!interrupt), so this resolves to a spinner for
                 // it without a special case.
-                status: hasPendingAction
-                  ? "interrupted"
-                  : ("pending" as const),
+                status: hasPendingAction ? "interrupted" : ("pending" as const),
               } as ToolCall;
             });
           messageMap.set(message.id!, {
@@ -957,9 +955,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                         message={data.message}
                         toolCalls={data.toolCalls}
                         isLoading={isLoading}
-                        isStreaming={
-                          isLoading && isLastMessage && isAssistant
-                        }
+                        isStreaming={isLoading && isLastMessage && isAssistant}
                         actionRequests={
                           isLastMessage ? actionRequests : undefined
                         }

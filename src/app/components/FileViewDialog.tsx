@@ -216,7 +216,7 @@ export const FileViewDialog = React.memo<{
               className="h-full min-h-[400px] resize-none font-mono text-sm"
             />
           ) : (
-            <ScrollArea className="bg-surface h-full rounded-md">
+            <ScrollArea className="h-full rounded-md bg-[var(--color-surface)]">
               <div className="p-4">
                 {fileContent ? (
                   isMarkdown ? (

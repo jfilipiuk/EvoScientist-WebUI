@@ -25,12 +25,14 @@ We appreciate your interest and the time you spend helping improve the EvoScient
 ## Development setup
 
 1. **Fork and clone** the repository:
+
    ```bash
    git clone https://github.com/<your-username>/EvoScientist-WebUI.git
    cd EvoScientist-WebUI
    ```
 
 2. **Install dependencies** (package manager is **npm**):
+
    ```bash
    npm install
    ```
@@ -48,7 +50,7 @@ We appreciate your interest and the time you spend helping improve the EvoScient
 | Command                | Description                             |
 | ---------------------- | --------------------------------------- |
 | `npm run dev`          | Start the dev server on port 4716       |
-| `npm run build`        | Production build + assemble `dist/`      |
+| `npm run build`        | Production build + assemble `dist/`     |
 | `npm start`            | Serve the production build on port 4716 |
 | `npm run start:dist`   | Run the assembled standalone `dist/`    |
 | `npm run lint`         | Lint with ESLint                        |

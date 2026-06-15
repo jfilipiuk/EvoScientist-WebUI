@@ -387,7 +387,7 @@ export const WorkspaceFileDialog = React.memo<{
                 placeholder="File is empty…"
               />
             ) : kind === "image" ? (
-              <ScrollArea className="bg-surface h-full rounded-md">
+              <ScrollArea className="h-full rounded-md bg-[var(--color-surface)]">
                 <div className="flex items-center justify-center p-4">
                   <img
                     src={workspaceFileUrl(path)}
@@ -434,7 +434,7 @@ export const WorkspaceFileDialog = React.memo<{
                 <p className="text-sm text-destructive">{error}</p>
               </div>
             ) : (
-              <ScrollArea className="bg-surface h-full rounded-md">
+              <ScrollArea className="h-full rounded-md bg-[var(--color-surface)]">
                 <div className="p-4">
                   {content && content.length > 0 ? (
                     isMarkdown ? (

@@ -5,6 +5,7 @@ import { CodeBlock } from "./CodeBlock";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
 
@@ -85,13 +86,18 @@ export const MermaidDiagram = React.memo<MermaidDiagramProps>(
     // and, multiplied across several diagrams, freezes the main thread.
     if (isStreaming) {
       return (
-        <pre className="my-4 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-surface p-3 text-xs text-[var(--color-text-tertiary)]">
+        <pre className="my-4 max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-[var(--color-surface)] p-3 text-xs text-[var(--color-text-tertiary)]">
           <code>{code}</code>
         </pre>
       );
     }
     if (!svg) {
-      return <CodeBlock language="mermaid" value={code} />;
+      return (
+        <CodeBlock
+          language="mermaid"
+          value={code}
+        />
+      );
     }
     return <MermaidPreview svg={svg} />;
   }
@@ -102,23 +108,23 @@ const MermaidPreview = React.memo<{ svg: string }>(({ svg }) => {
   const [open, setOpen] = useState(false);
   return (
     <>
-      <div
-        role="button"
-        tabIndex={0}
+      <button
+        type="button"
         aria-label="Open diagram in full view"
+        aria-haspopup="dialog"
         onClick={() => setOpen(true)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setOpen(true);
-          }
-        }}
-        className="my-4 max-w-full cursor-zoom-in overflow-x-auto rounded-md bg-surface p-4 transition-shadow hover:ring-2 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
+        className="my-4 block max-w-full cursor-zoom-in overflow-x-auto rounded-md bg-[var(--color-surface)] p-4 text-left transition-shadow hover:ring-2 hover:ring-primary/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary"
         dangerouslySetInnerHTML={{ __html: svg }}
       />
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[90vh] max-w-[90vw] overflow-auto p-6 sm:max-w-[90vw]">
+      <Dialog
+        open={open}
+        onOpenChange={setOpen}
+      >
+        <DialogContent className="max-h-[calc(100svh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-auto p-4 sm:max-h-[90vh] sm:w-auto sm:max-w-[90vw] sm:p-6">
           <DialogTitle className="sr-only">Mermaid diagram</DialogTitle>
+          <DialogDescription className="sr-only">
+            Full-size preview of the generated Mermaid diagram.
+          </DialogDescription>
           <div
             className="[&_svg]:h-auto [&_svg]:max-w-none"
             dangerouslySetInnerHTML={{ __html: svg }}
