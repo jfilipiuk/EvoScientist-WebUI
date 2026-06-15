@@ -8,6 +8,8 @@ import {
   DialogDescription,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { RotateCcw, ZoomIn, ZoomOut } from "lucide-react";
+import { useTheme } from "@/providers/ThemeProvider";
 
 interface MermaidDiagramProps {
   code: string;
@@ -20,28 +22,35 @@ interface MermaidDiagramProps {
 // call through this promise chain. Also caches the mermaid import + the
 // one-time initialize() so they don't run per-diagram.
 type MermaidModule = typeof import("mermaid").default;
+type MermaidTheme = "default" | "dark";
 let mermaidLoader: Promise<MermaidModule> | null = null;
 let renderChain: Promise<unknown> = Promise.resolve();
 
 function loadMermaid(): Promise<MermaidModule> {
   if (!mermaidLoader) {
-    mermaidLoader = import("mermaid").then((mod) => {
-      mod.default.initialize({
-        startOnLoad: false,
-        theme: "dark",
-        // "strict" forbids raw HTML in node labels — safer for AI-generated
-        // diagram source rendered alongside user content.
-        securityLevel: "strict",
-      });
-      return mod.default;
-    });
+    mermaidLoader = import("mermaid").then((mod) => mod.default);
   }
   return mermaidLoader;
 }
 
-async function renderMermaid(id: string, code: string): Promise<string | null> {
+function initializeMermaid(mermaid: MermaidModule, theme: MermaidTheme) {
+  mermaid.initialize({
+    startOnLoad: false,
+    theme,
+    // "strict" forbids raw HTML in node labels — safer for AI-generated
+    // diagram source rendered alongside user content.
+    securityLevel: "strict",
+  });
+}
+
+async function renderMermaid(
+  id: string,
+  code: string,
+  theme: MermaidTheme
+): Promise<string | null> {
   const next = renderChain.then(async () => {
     const mermaid = await loadMermaid();
+    initializeMermaid(mermaid, theme);
     // parse() with suppressErrors gives a boolean instead of the "red bomb"
     // error-SVG that render() produces on bad input.
     const parsed = await mermaid.parse(code, { suppressErrors: true });
@@ -60,6 +69,9 @@ export const MermaidDiagram = React.memo<MermaidDiagramProps>(
     // useId is React 19's stable-across-renders unique id. Mermaid needs a
     // CSS-safe id; useId returns strings like ":r3:" so strip the colons.
     const reactId = useId().replace(/:/g, "");
+    const { resolvedTheme } = useTheme();
+    const mermaidTheme: MermaidTheme =
+      resolvedTheme === "dark" ? "dark" : "default";
     const [svg, setSvg] = useState<string | null>(null);
 
     useEffect(() => {
@@ -69,7 +81,8 @@ export const MermaidDiagram = React.memo<MermaidDiagramProps>(
       // ends (this effect re-runs because isStreaming is in the deps).
       if (isStreaming) return;
       let cancelled = false;
-      renderMermaid(`mermaid-${reactId}`, code)
+      setSvg(null);
+      renderMermaid(`mermaid-${reactId}`, code, mermaidTheme)
         .then((result) => {
           if (!cancelled) setSvg(result);
         })
@@ -79,7 +92,7 @@ export const MermaidDiagram = React.memo<MermaidDiagramProps>(
       return () => {
         cancelled = true;
       };
-    }, [code, reactId, isStreaming]);
+    }, [code, reactId, isStreaming, mermaidTheme]);
 
     // During streaming the source grows token-by-token. Avoid the syntax
     // highlighter here — it re-tokenizes the full string on every keystroke
@@ -106,6 +119,16 @@ MermaidDiagram.displayName = "MermaidDiagram";
 
 const MermaidPreview = React.memo<{ svg: string }>(({ svg }) => {
   const [open, setOpen] = useState(false);
+  const [zoom, setZoom] = useState(1.25);
+  const zoomPercent = Math.round(zoom * 100);
+
+  useEffect(() => {
+    if (open) setZoom(1.25);
+  }, [open]);
+
+  const zoomOut = () => setZoom((value) => Math.max(0.75, value - 0.25));
+  const zoomIn = () => setZoom((value) => Math.min(2.5, value + 0.25));
+
   return (
     <>
       <button
@@ -120,15 +143,61 @@ const MermaidPreview = React.memo<{ svg: string }>(({ svg }) => {
         open={open}
         onOpenChange={setOpen}
       >
-        <DialogContent className="max-h-[calc(100svh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-auto p-4 sm:max-h-[90vh] sm:w-auto sm:max-w-[90vw] sm:p-6">
+        <DialogContent className="max-h-[calc(100svh-1rem)] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] overflow-auto p-3 sm:max-h-[92vh] sm:w-[min(1200px,95vw)] sm:max-w-[95vw] sm:p-4">
           <DialogTitle className="sr-only">Mermaid diagram</DialogTitle>
           <DialogDescription className="sr-only">
             Full-size preview of the generated Mermaid diagram.
           </DialogDescription>
-          <div
-            className="[&_svg]:h-auto [&_svg]:max-w-none"
-            dangerouslySetInnerHTML={{ __html: svg }}
-          />
+          <div className="sticky top-0 z-10 -mx-1 -mt-1 mb-2 flex items-center justify-end gap-1 bg-background/95 pb-2 pr-8 backdrop-blur">
+            <button
+              type="button"
+              onClick={zoomOut}
+              disabled={zoom <= 0.75}
+              aria-label="Zoom out"
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ZoomOut
+                className="size-4"
+                aria-hidden="true"
+              />
+            </button>
+            <span
+              className="min-w-12 text-center text-xs font-medium tabular-nums text-muted-foreground"
+              aria-live="polite"
+            >
+              {zoomPercent}%
+            </span>
+            <button
+              type="button"
+              onClick={zoomIn}
+              disabled={zoom >= 2.5}
+              aria-label="Zoom in"
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <ZoomIn
+                className="size-4"
+                aria-hidden="true"
+              />
+            </button>
+            <button
+              type="button"
+              onClick={() => setZoom(1.25)}
+              aria-label="Reset zoom"
+              className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <RotateCcw
+                className="size-4"
+                aria-hidden="true"
+              />
+            </button>
+          </div>
+          <div className="min-w-full overflow-auto rounded-md bg-[var(--color-surface)] p-3">
+            <div
+              className="[&_svg]:!h-auto [&_svg]:!w-full [&_svg]:!max-w-none"
+              style={{ width: `${zoomPercent}%` }}
+              dangerouslySetInnerHTML={{ __html: svg }}
+            />
+          </div>
         </DialogContent>
       </Dialog>
     </>

@@ -130,6 +130,10 @@ We welcome contributions! See the [Contributing Guidelines](./CONTRIBUTING.md) f
 
 Every contribution brings us one step closer to a future where AI accelerates scientific breakthroughs for all of humanity.
 
+<a href="https://github.com/EvoScientist/EvoScientist-WebUI/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=EvoScientist/EvoScientist-WebUI" />
+</a>
+
 <p align="right"><a href="#top">🔝Back to top</a></p>
 
 ## 📚 Acknowledgments
