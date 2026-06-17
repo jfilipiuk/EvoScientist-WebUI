@@ -119,11 +119,11 @@ MermaidDiagram.displayName = "MermaidDiagram";
 
 const MermaidPreview = React.memo<{ svg: string }>(({ svg }) => {
   const [open, setOpen] = useState(false);
-  const [zoom, setZoom] = useState(1.25);
+  const [zoom, setZoom] = useState(1);
   const zoomPercent = Math.round(zoom * 100);
 
   useEffect(() => {
-    if (open) setZoom(1.25);
+    if (open) setZoom(1);
   }, [open]);
 
   const zoomOut = () => setZoom((value) => Math.max(0.75, value - 0.25));
@@ -181,7 +181,7 @@ const MermaidPreview = React.memo<{ svg: string }>(({ svg }) => {
             </button>
             <button
               type="button"
-              onClick={() => setZoom(1.25)}
+              onClick={() => setZoom(1)}
               aria-label="Reset zoom"
               className="inline-flex size-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
             >
