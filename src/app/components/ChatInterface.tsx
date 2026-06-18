@@ -23,6 +23,12 @@ import {
   TriangleAlert,
   Paperclip,
   X,
+  Pencil,
+  CornerDownRight,
+  Trash2,
+  GripVertical,
+  Ellipsis,
+  ListX,
 } from "lucide-react";
 import { ChatMessage } from "@/app/components/ChatMessage";
 import {
@@ -105,6 +111,31 @@ interface UploadedWorkspaceFile {
   name: string;
   path: string;
   size: number;
+}
+
+// A message typed while the agent is busy. It waits in the queue and is sent
+// verbatim (append-only — never replaces what's already in the thread) once the
+// current turn finishes or is stopped. Each carries its own attached files.
+interface QueuedMessage {
+  id: number;
+  text: string;
+  files: UploadedWorkspaceFile[];
+  threadId: string | null;
+}
+
+// Build the message body sent to the backend, appending the same workspace-file
+// annotation handleSubmit uses so queued messages keep their attachments.
+function formatMessageWithFiles(
+  text: string,
+  files: UploadedWorkspaceFile[]
+): string {
+  const workspaceFiles =
+    files.length > 0
+      ? `\n\nWorkspace files uploaded for this request:\n${files
+          .map((file) => `- ${file.path}`)
+          .join("\n")}`
+      : "";
+  return `${text}${workspaceFiles}`;
 }
 
 function parseToolArgs(rawArgs: unknown): Record<string, unknown> {
@@ -214,6 +245,15 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       []
     );
     const [isUploadingFiles, setIsUploadingFiles] = useState(false);
+    // Messages typed while the agent is busy (Claude Code-style queue). They
+    // drain one-per-idle-window into the thread once it's free. A ref mirrors the
+    // latest queue so event handlers (key ↑, edit) read current state without
+    // being recreated; queueIdRef hands out stable keys.
+    const [queuedMessages, setQueuedMessages] = useState<QueuedMessage[]>([]);
+    const queuedMessagesRef = useRef<QueuedMessage[]>(queuedMessages);
+    queuedMessagesRef.current = queuedMessages;
+    const queueIdRef = useRef(0);
+    const draggedQueuedMessageIdRef = useRef<number | null>(null);
     const [threadId] = useQueryState("threadId");
     // Auto-approve is per-thread and persisted (see lib/autoApprove): it follows
     // the conversation across view switches (Skills/Memory unmount this), thread
@@ -304,6 +344,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       // until the composer is clear. Pending completions stay unreported (= the
       // queue) and drain one per idle window.
       if (isLoading || autoFireInFlightRef.current || input.trim()) return;
+      // User-queued messages take the idle slot first — hold auto-reports until
+      // the user's own queue has drained.
+      if (queuedMessages.length > 0) return;
       const reportedKeys = getThreadAutoNotifyReportedKeys(threadId);
       for (const t of liveAgentTasks) {
         if (!isTerminalStatus(t.liveStatus)) continue;
@@ -338,6 +381,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       messages,
       sendMessage,
       threadId,
+      queuedMessages,
     ]);
 
     // Re-engage stick-to-bottom whenever a new run starts (sending a message or
@@ -468,6 +512,45 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       (Array.isArray(interruptValue?.action_requests) &&
         interruptValue.action_requests.length > 0);
     const submitDisabled = isLoading || !assistant || hasPendingInterrupt;
+
+    // Drain the user-message queue: when the thread goes idle (and no interrupt is
+    // pending), send the head as the next turn. One per idle window — the
+    // autoFireInFlightRef latch (shared with auto-report) covers the gap before
+    // isLoading flips true so two messages can't race onto the thread. After Stop,
+    // isLoading drops and the queue still drains (queued = intent to send).
+    useEffect(() => {
+      if (isLoading || hasPendingInterrupt || autoFireInFlightRef.current)
+        return;
+      if (queuedMessages.length === 0) return;
+      const [head, ...rest] = queuedMessages;
+      // Effects from the previous render still run once after a route/thread
+      // change. Never let that stale queue drain into the newly selected thread.
+      if (head.threadId !== threadId) return;
+      autoFireInFlightRef.current = true;
+      setQueuedMessages(rest);
+      sendMessage(formatMessageWithFiles(head.text, head.files));
+    }, [isLoading, hasPendingInterrupt, queuedMessages, sendMessage, threadId]);
+
+    // Clear the queue when switching to a *different* conversation, but NOT on the
+    // null→real-id transition that happens when the first message of a brand-new
+    // chat creates its thread (the queue belongs to this same conversation).
+    const queueThreadRef = useRef(threadId);
+    useEffect(() => {
+      const prev = queueThreadRef.current;
+      queueThreadRef.current = threadId;
+      if (prev === null && threadId !== null) {
+        // The first submitted message creates the thread asynchronously. Carry
+        // any follow-ups queued during that transition into the new thread.
+        setQueuedMessages((messages) =>
+          messages.map((message) =>
+            message.threadId === null ? { ...message, threadId } : message
+          )
+        );
+        return;
+      }
+      if (prev !== threadId) setQueuedMessages([]);
+    }, [threadId]);
+
     const enableAutoApprove = useCallback(() => {
       setAutoApproveState(true);
       setThreadAutoApprove(threadId, true);
@@ -558,45 +641,139 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
           e.preventDefault();
         }
         const messageText = input.trim();
-        if (!messageText || isLoading || isUploadingFiles || submitDisabled)
+        if (!messageText) return;
+        // Can't compose with no assistant, a pending interrupt, or files still
+        // uploading. (Unlike before, isLoading is NOT a blocker — see below.)
+        if (!assistant || hasPendingInterrupt || isUploadingFiles) return;
+        // Agent busy → queue it (Claude Code style). The queue drains and sends
+        // automatically once this turn finishes (or is stopped); the message is
+        // appended as the next turn — it never replaces what's already running.
+        if (isLoading) {
+          setQueuedMessages((prev) => [
+            ...prev,
+            {
+              id: (queueIdRef.current += 1),
+              text: messageText,
+              files: pendingFiles,
+              threadId,
+            },
+          ]);
+          setInput("");
+          setPendingFiles([]);
           return;
+        }
         migrateAutoApproveForCreatedThreadRef.current =
           threadId === null && autoApprove;
-        const workspaceFiles =
-          pendingFiles.length > 0
-            ? `\n\nWorkspace files uploaded for this request:\n${pendingFiles
-                .map((file) => `- ${file.path}`)
-                .join("\n")}`
-            : "";
-        sendMessage(`${messageText}${workspaceFiles}`);
+        sendMessage(formatMessageWithFiles(messageText, pendingFiles));
         setInput("");
         setPendingFiles([]);
       },
       [
         input,
+        assistant,
+        hasPendingInterrupt,
         autoApprove,
         isLoading,
         isUploadingFiles,
         pendingFiles,
         sendMessage,
-        setInput,
-        submitDisabled,
         threadId,
       ]
     );
 
+    // Pull a queued message back into the composer to edit it (also restores its
+    // attached files), removing it from the queue. Only ever touches the unsent
+    // draft — the running/sent messages in the thread are untouched.
+    const editQueuedMessage = useCallback((id: number) => {
+      const target = queuedMessagesRef.current.find((m) => m.id === id);
+      if (!target) return;
+      setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
+      setInput(target.text);
+      setPendingFiles(target.files);
+      requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(target.text.length, target.text.length);
+        }
+      });
+    }, []);
+
+    // Codex-style "Steer": prioritize this instruction without interrupting the
+    // active run. It remains in our visible queue and drains in the next idle
+    // window, which preserves the same non-interrupting contract.
+    const steerQueuedMessage = useCallback((id: number) => {
+      setQueuedMessages((messages) => {
+        const target = messages.find((message) => message.id === id);
+        if (!target || messages[0]?.id === id) return messages;
+        return [target, ...messages.filter((message) => message.id !== id)];
+      });
+      toast.info(
+        "This message will run next without interrupting the current turn."
+      );
+    }, []);
+
+    const moveQueuedMessage = useCallback((id: number, direction: -1 | 1) => {
+      setQueuedMessages((messages) => {
+        const from = messages.findIndex((message) => message.id === id);
+        const to = from + direction;
+        if (from < 0 || to < 0 || to >= messages.length) return messages;
+        const next = [...messages];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    }, []);
+
+    const dropQueuedMessage = useCallback((targetId: number) => {
+      const sourceId = draggedQueuedMessageIdRef.current;
+      draggedQueuedMessageIdRef.current = null;
+      if (sourceId === null || sourceId === targetId) return;
+      setQueuedMessages((messages) => {
+        const from = messages.findIndex((message) => message.id === sourceId);
+        const to = messages.findIndex((message) => message.id === targetId);
+        if (from < 0 || to < 0) return messages;
+        const next = [...messages];
+        const [moved] = next.splice(from, 1);
+        next.splice(to, 0, moved);
+        return next;
+      });
+    }, []);
+
+    const removeQueuedMessage = useCallback((id: number) => {
+      setQueuedMessages((prev) => prev.filter((m) => m.id !== id));
+    }, []);
+
+    const clearQueuedMessages = useCallback(() => {
+      setQueuedMessages([]);
+    }, []);
+
     const handleKeyDown = useCallback(
       (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-        if (submitDisabled) return;
+        // The composer is locked only when an interrupt is pending (the textarea
+        // is disabled then) — NOT while the agent is busy: typing + Enter queues a
+        // follow-up rather than doing nothing.
+        if (hasPendingInterrupt) return;
         // Don't submit while an IME is composing (e.g. pressing Enter to pick a
         // Chinese/Japanese/Korean candidate must confirm text, not send).
         if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+        // ↑ on an empty composer pulls the most recent queued message back to edit.
+        if (
+          e.key === "ArrowUp" &&
+          input.length === 0 &&
+          queuedMessagesRef.current.length > 0
+        ) {
+          e.preventDefault();
+          const queue = queuedMessagesRef.current;
+          editQueuedMessage(queue[queue.length - 1].id);
+          return;
+        }
         if (e.key === "Enter" && !e.shiftKey) {
           e.preventDefault();
           handleSubmit();
         }
       },
-      [handleSubmit, submitDisabled]
+      [handleSubmit, hasPendingInterrupt, input, editQueuedMessage]
     );
 
     // Pull a previous user message back into the composer to edit/resend it,
@@ -1097,10 +1274,169 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
         </div>
 
         <div className="flex-shrink-0 bg-background">
+          {queuedMessages.length > 0 && (
+            <div
+              aria-label="Queued messages"
+              className="relative mx-auto -mb-4 w-[calc(100%-16px)] max-w-[960px] px-2 sm:w-[calc(100%-24px)]"
+            >
+              <div className="rounded-b-lg rounded-t-2xl border border-border bg-background pb-5 pt-1 shadow-sm">
+                {queuedMessages.map((q, index) => {
+                  const editBlocked =
+                    input.trim().length > 0 || pendingFiles.length > 0;
+                  return (
+                    <div
+                      key={q.id}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={() => dropQueuedMessage(q.id)}
+                      className="relative flex min-h-11 items-start gap-1.5 px-2 py-2 text-sm sm:gap-2 sm:px-3"
+                    >
+                      <button
+                        type="button"
+                        draggable
+                        onDragStart={(event) => {
+                          draggedQueuedMessageIdRef.current = q.id;
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData(
+                            "text/plain",
+                            String(q.id)
+                          );
+                        }}
+                        onDragEnd={() => {
+                          draggedQueuedMessageIdRef.current = null;
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowUp" && index > 0) {
+                            event.preventDefault();
+                            moveQueuedMessage(q.id, -1);
+                          }
+                          if (
+                            event.key === "ArrowDown" &&
+                            index < queuedMessages.length - 1
+                          ) {
+                            event.preventDefault();
+                            moveQueuedMessage(q.id, 1);
+                          }
+                        }}
+                        aria-label={`Reorder queued message ${index + 1} of ${
+                          queuedMessages.length
+                        }`}
+                        title="Drag to reorder, or use the arrow keys"
+                        className="mt-0.5 inline-flex size-5 shrink-0 cursor-grab items-center justify-center rounded text-muted-foreground/60 focus-visible:ring-2 focus-visible:ring-ring active:cursor-grabbing"
+                      >
+                        <GripVertical
+                          className="size-3.5"
+                          aria-hidden="true"
+                        />
+                      </button>
+                      <CornerDownRight
+                        className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                        aria-hidden="true"
+                      />
+                      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                        <span className="line-clamp-2 whitespace-pre-wrap break-words pt-0.5 text-foreground">
+                          {q.text}
+                        </span>
+                        {q.files.length > 0 && (
+                          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
+                            <Paperclip
+                              className="size-3 shrink-0"
+                              aria-hidden="true"
+                            />
+                            {q.files.length} file
+                            {q.files.length === 1 ? "" : "s"}
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => steerQueuedMessage(q.id)}
+                          aria-label="Steer with this message next"
+                          title="Submit next without interrupting the current turn"
+                          className="inline-flex h-7 items-center gap-1 rounded-full px-2 text-xs font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <CornerDownRight
+                            className="size-3.5"
+                            aria-hidden="true"
+                          />
+                          <span className="hidden sm:inline">Steer</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => removeQueuedMessage(q.id)}
+                          aria-label="Remove queued message"
+                          title="Remove from queue"
+                          className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring"
+                        >
+                          <Trash2
+                            className="size-3.5"
+                            aria-hidden="true"
+                          />
+                        </button>
+                        <details
+                          className="group/menu relative"
+                          onBlur={(event) => {
+                            if (
+                              !event.currentTarget.contains(event.relatedTarget)
+                            ) {
+                              event.currentTarget.removeAttribute("open");
+                            }
+                          }}
+                          onKeyDown={(event) => {
+                            if (event.key === "Escape") {
+                              event.currentTarget.removeAttribute("open");
+                              event.currentTarget
+                                .querySelector("summary")
+                                ?.focus();
+                            }
+                          }}
+                        >
+                          <summary
+                            aria-label="More queued message actions"
+                            title="More actions"
+                            className="inline-flex size-7 cursor-pointer list-none items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring [&::-webkit-details-marker]:hidden"
+                          >
+                            <Ellipsis
+                              className="size-4"
+                              aria-hidden="true"
+                            />
+                          </summary>
+                          <div className="absolute right-0 top-8 z-30 min-w-40 rounded-xl border border-border bg-background p-1.5 shadow-lg">
+                            <button
+                              type="button"
+                              onClick={() => editQueuedMessage(q.id)}
+                              disabled={editBlocked}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Pencil
+                                className="size-4"
+                                aria-hidden="true"
+                              />
+                              Edit message
+                            </button>
+                            <button
+                              type="button"
+                              onClick={clearQueuedMessages}
+                              className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm text-foreground transition-colors hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+                            >
+                              <ListX
+                                className="size-4"
+                                aria-hidden="true"
+                              />
+                              Close queue
+                            </button>
+                          </div>
+                        </details>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
           <div
             className={cn(
-              "mb-2 flex flex-shrink-0 flex-col overflow-hidden rounded-lg border border-border bg-background sm:mb-4",
-              "mx-auto w-[calc(100%-16px)] max-w-[960px] transition-colors duration-200 ease-in-out sm:w-[calc(100%-24px)]",
+              "relative z-10 mx-auto mb-2 flex w-[calc(100%-16px)] max-w-[960px] flex-shrink-0 flex-col overflow-hidden rounded-xl border border-border bg-background transition-colors duration-200 ease-in-out sm:mb-4 sm:w-[calc(100%-24px)]",
               "focus-within:ring-2 focus-within:ring-ring"
             )}
           >
@@ -1464,7 +1800,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                   hasPendingInterrupt
                     ? "Respond to the request above to continue…"
                     : isLoading
-                    ? "Researching…"
+                    ? "Queue a follow-up — sends when this turn finishes…"
                     : "Ask EvoScientist anything…"
                 }
                 className="font-inherit field-sizing-content flex-1 resize-none border-0 bg-transparent px-3.5 pb-2.5 pt-3 text-sm leading-6 text-primary outline-none placeholder:text-tertiary disabled:cursor-not-allowed sm:px-4"
@@ -1477,13 +1813,17 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                     type="file"
                     multiple
                     onChange={handleFilesSelected}
-                    disabled={submitDisabled || isUploadingFiles}
+                    disabled={
+                      !assistant || hasPendingInterrupt || isUploadingFiles
+                    }
                     className="hidden"
                   />
                   <button
                     type="button"
                     onClick={() => uploadInputRef.current?.click()}
-                    disabled={submitDisabled || isUploadingFiles}
+                    disabled={
+                      !assistant || hasPendingInterrupt || isUploadingFiles
+                    }
                     aria-label="Upload files to workspace"
                     title="Upload files to workspace (max 50 MB each)"
                     className="inline-flex size-8 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
