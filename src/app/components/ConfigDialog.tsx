@@ -143,10 +143,10 @@ export function ConfigDialog({
               htmlFor="collapseAgentActions"
               className="text-sm font-normal leading-snug"
             >
-              Collapse completed agent actions
+              Collapse agent actions by default
               <span className="block text-xs text-muted-foreground">
-                Folds the agent&apos;s tool-call sequence after a turn finishes
-                — only auto-collapses if you&apos;re scrolled to the bottom.
+                Keeps tool-call sequences folded while running and after
+                completion. Approval controls remain visible.
               </span>
             </Label>
           </div>

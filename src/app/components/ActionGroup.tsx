@@ -46,11 +46,11 @@ interface ActionGroupProps {
   summarizationEvent: { content: string; cutoffIndex: number } | null;
 }
 
-// First tool call name — what we surface in the header summary line.
+// Last tool call name — what we surface in the header summary line.
 function lastToolName(items: GroupedActionItem[]): string {
   for (let i = items.length - 1; i >= 0; i--) {
     const tcs = items[i].toolCalls;
-    if (tcs.length > 0) return tcs[0].name || "tool";
+    if (tcs.length > 0) return tcs[tcs.length - 1].name || "tool";
   }
   return "action";
 }
@@ -93,18 +93,11 @@ export const ActionGroup = React.memo<ActionGroupProps>(function ActionGroup({
     return items.some((item) => item.message.id === lastMessageId);
   }, [autoApprove, actionRequests.length, lastMessageId, items]);
 
-  // Honor the user's preference for the initial state. Per issue #13 the
-  // body stays collapsed during runs AND while an approval is pending —
-  // approvals surface via the preview slot below, which renders the single
-  // approval-bearing message without expanding the whole timeline.
   const [open, setOpen] = useState<boolean>(() => !defaultCollapsed);
   const wasStreamingRef = useRef(isStreaming);
 
-  // Auto-collapse on settle: when streaming just ended AND no approval is
-  // pending AND user is at the bottom (so a scrolled-up reader isn't jumped).
-  // Folds groups the user expanded mid-run to peek. We don't auto-collapse
-  // on approval resolution: the body is never forced open by approvals, so
-  // if it IS open, the user opened it intentionally — let them keep it.
+  // Auto-collapse when streaming ends, but only if the user is at the bottom.
+  // Approvals never force-open; their controls render in the preview below.
   useEffect(() => {
     const wasStreaming = wasStreamingRef.current;
     wasStreamingRef.current = isStreaming;
@@ -119,7 +112,9 @@ export const ActionGroup = React.memo<ActionGroupProps>(function ActionGroup({
     }
   }, [isStreaming, hasPendingApproval, defaultCollapsed, isAtBottom]);
 
-  const count = items.length;
+  // One AI message can carry several tool calls, so count the actual actions
+  // rather than the number of message containers in this group.
+  const count = items.reduce((total, item) => total + item.toolCalls.length, 0);
   const toolName = lastToolName(items);
   const headerText = isStreaming
     ? `${count} action${count === 1 ? "" : "s"} running — ${toolName}`
@@ -150,52 +145,45 @@ export const ActionGroup = React.memo<ActionGroupProps>(function ActionGroup({
         )}
         <span className="truncate">{headerText}</span>
       </button>
-      {/* Approval preview: when the group is collapsed and an approval is
-          pending, render JUST the last item (which carries the action
-          requests) outside the body so the user can act without expanding
-          the whole timeline. When the group is open, this slot is empty
-          and the same item renders inside the body — one instance at a
-          time, no duplication. */}
-      {!open &&
-        hasPendingApproval &&
-        lastMessageId !== undefined &&
-        (() => {
-          const previewItem = items.find((i) => i.message.id === lastMessageId);
-          if (!previewItem) return null;
-          const messageUi = ui?.filter(
-            (u: any) => u.metadata?.message_id === previewItem.message.id
-          );
-          return (
-            <div className="mt-2 space-y-2 border-l-2 border-border pl-3">
-              <ChatMessage
-                message={previewItem.message}
-                toolCalls={previewItem.toolCalls}
-                isLoading={isLoading}
-                isStreaming={isStreaming}
-                actionRequests={actionRequests}
-                submittedActionRequestKeys={submittedActionRequestKeys}
-                onActionRequestSubmitted={onActionRequestSubmitted}
-                reviewConfigsMap={reviewConfigsMap ?? undefined}
-                ui={messageUi}
-                stream={stream}
-                onResumeInterrupt={onResumeInterrupt}
-                graphId={graphId}
-                onEditMessage={onEditMessage}
-                autoApprove={autoApprove}
-                subAgentSteps={subAgentSteps}
-              />
-            </div>
-          );
-        })()}
+      {/* Collapsed approval preview — renders the single approval-bearing
+          message so the user can act without expanding the full timeline.
+          When open, this is empty and the same item renders inside the body. */}
+      {(() => {
+        if (open || !hasPendingApproval || lastMessageId === undefined)
+          return null;
+        const previewItem = items.find((i) => i.message.id === lastMessageId);
+        if (!previewItem) return null;
+        const messageUi = ui?.filter(
+          (u) => u.metadata?.message_id === previewItem.message.id
+        );
+        return (
+          <div className="mt-2 space-y-2 border-l-2 border-border pl-3">
+            <ChatMessage
+              message={previewItem.message}
+              toolCalls={previewItem.toolCalls}
+              isLoading={isLoading}
+              isStreaming={isStreaming}
+              actionRequests={actionRequests}
+              submittedActionRequestKeys={submittedActionRequestKeys}
+              onActionRequestSubmitted={onActionRequestSubmitted}
+              reviewConfigsMap={reviewConfigsMap ?? undefined}
+              ui={messageUi}
+              stream={stream}
+              onResumeInterrupt={onResumeInterrupt}
+              graphId={graphId}
+              onEditMessage={onEditMessage}
+              autoApprove={autoApprove}
+              subAgentSteps={subAgentSteps}
+            />
+          </div>
+        );
+      })()}
       {open && (
         <div className="mt-2 space-y-2 border-l-2 border-border pl-3">
-          {/* Children render below; the bottom collapse button comes after the
-              map and is rendered conditionally (only when there's nothing
-              forcing the section open). */}
           {items.map((item) => {
             const isLastOverall = item.message.id === lastMessageId;
             const messageUi = ui?.filter(
-              (u: any) => u.metadata?.message_id === item.message.id
+              (u) => u.metadata?.message_id === item.message.id
             );
             const showCompactionBefore = compactionAnchorId === item.message.id;
             return (
@@ -228,10 +216,7 @@ export const ActionGroup = React.memo<ActionGroupProps>(function ActionGroup({
               </React.Fragment>
             );
           })}
-          {/* Bottom collapse button — easy reach after scrolling through a
-              long group. Collapse always sticks now (no force-open during
-              streaming, approval force-open is one-shot), so this is safe
-              to render whenever the body is visible. */}
+          {/* Bottom collapse button — easy reach after scrolling through a long group. */}
           <button
             type="button"
             onClick={() => setOpen(false)}
