@@ -84,6 +84,7 @@ import {
 } from "@/components/ui/dialog";
 import { useQueryState } from "nuqs";
 import { toast } from "sonner";
+import { useClient } from "@/providers/ClientProvider";
 
 interface ChatInterfaceProps {
   assistant: Assistant | null;
@@ -215,6 +216,53 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
     );
     const [isUploadingFiles, setIsUploadingFiles] = useState(false);
     const [threadId] = useQueryState("threadId");
+    const client = useClient();
+    // Empty-state context for threads created from an idea-spark node — read
+    // out of thread metadata so the placeholder can orient the user instead of
+    // showing the generic "Start Research" copy. Cleared when threadId changes.
+    const [sparkContext, setSparkContext] = useState<{
+      threadId: string;
+      nodeTitle: string;
+      graphId: string;
+    } | null>(null);
+    useEffect(() => {
+      if (!threadId) {
+        setSparkContext(null);
+        return;
+      }
+      let cancelled = false;
+      void (async () => {
+        try {
+          const t = (await client.threads.get(threadId)) as {
+            metadata?: {
+              idea_spark_graph_id?: unknown;
+              idea_spark_node_snapshot?: { title?: unknown } | null;
+            };
+          };
+          if (cancelled) return;
+          const meta = t.metadata ?? {};
+          const graphId =
+            typeof meta.idea_spark_graph_id === "string"
+              ? meta.idea_spark_graph_id
+              : null;
+          const nodeTitle =
+            meta.idea_spark_node_snapshot &&
+            typeof meta.idea_spark_node_snapshot.title === "string"
+              ? meta.idea_spark_node_snapshot.title
+              : null;
+          if (graphId && nodeTitle) {
+            setSparkContext({ threadId, nodeTitle, graphId });
+          } else {
+            setSparkContext(null);
+          }
+        } catch {
+          if (!cancelled) setSparkContext(null);
+        }
+      })();
+      return () => {
+        cancelled = true;
+      };
+    }, [client, threadId]);
     // Auto-approve is per-thread and persisted (see lib/autoApprove): it follows
     // the conversation across view switches (Skills/Memory unmount this), thread
     // switches, and reloads. Seed from storage for whatever thread is active on
@@ -980,11 +1028,14 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                 {processedMessages.length === 0 && !isLoading && (
                   <div className="flex min-h-[42vh] flex-col items-center justify-center px-3 text-center">
                     <h2 className="text-pretty text-lg font-semibold sm:text-xl">
-                      Start Research
+                      {sparkContext && sparkContext.threadId === threadId
+                        ? `Continuation of "${sparkContext.nodeTitle}"`
+                        : "Start Research"}
                     </h2>
                     <p className="mt-2 max-w-lg text-sm text-muted-foreground">
-                      Ask EvoScientist to review literature, inspect workspace
-                      files, or plan the next experiment.
+                      {sparkContext && sparkContext.threadId === threadId
+                        ? `from spark graph ${sparkContext.graphId}`
+                        : "Ask EvoScientist to review literature, inspect workspace files, or plan the next experiment."}
                     </p>
                     <div className="mt-4 flex max-w-2xl flex-wrap justify-center gap-2">
                       {SUGGESTED_PROMPTS.map((prompt) => (
