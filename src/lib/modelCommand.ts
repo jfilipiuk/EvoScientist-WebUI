@@ -7,11 +7,12 @@
 // and persist the choice per-thread (in thread metadata, not localStorage —
 // the choice should follow the conversation, not the browser tab).
 //
-// Listing available models is a separate concern: the backend has the
-// authoritative registry in `EvoScientist/llm/models.py`, but no HTTP endpoint
-// exposes it today. Until that lands we ship a curated `COMMON_MODELS` list
-// for the picker. Names outside the list are NOT rejected — `/model <name>`
-// passes through verbatim and the middleware accepts anything `init_chat_model`
+// Listing available models: the backend's authoritative registry lives in
+// `EvoScientist/llm/models.py` and is exposed at `GET /api/models` (mounted
+// via langgraph.json). `useAvailableModels` fetches that endpoint at runtime;
+// `COMMON_MODELS` below is a fallback for older deployments or network
+// failures. Names outside the list are NOT rejected — `/model <name>` passes
+// through verbatim and the middleware accepts anything `init_chat_model`
 // recognises, so power users aren't blocked by our curation.
 
 /** Thread metadata key carrying the per-thread model override. Mirrors the
