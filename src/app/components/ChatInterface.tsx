@@ -289,7 +289,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
         cancelled = true;
       };
     }, []);
-    // Messages typed while the agent is busy (Claude Code-style queue). They
+    // Messages typed while the agent is busy are queued. They
     // drain one-per-idle-window into the thread once it's free. A ref mirrors the
     // latest queue so event handlers (key ↑, edit) read current state without
     // being recreated; queueIdRef hands out stable keys.
@@ -857,7 +857,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
         // Can't compose with no assistant, a pending interrupt, or files still
         // uploading. (Unlike before, isLoading is NOT a blocker — see below.)
         if (!assistant || hasPendingInterrupt || isUploadingFiles) return;
-        // Agent busy → queue it (Claude Code style). The queue drains and sends
+        // Agent busy → queue it. The queue drains and sends
         // automatically once this turn finishes (or is stopped); the message is
         // appended as the next turn — it never replaces what's already running.
         if (isLoading) {
@@ -912,7 +912,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       });
     }, []);
 
-    // Codex-style "Steer": prioritize this instruction without interrupting the
+    // "Steer": prioritize this instruction without interrupting the
     // active run. It remains in our visible queue and drains in the next idle
     // window, which preserves the same non-interrupting contract.
     const steerQueuedMessage = useCallback((id: number) => {

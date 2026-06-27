@@ -122,7 +122,7 @@ export function AgentsPanel({ onReportToMainChat }: AgentsPanelProps) {
   // Hidden power-user feature: a tiny composer per expanded task that sends a
   // message straight to that sub-agent's own thread. Note this is a SIDE channel
   // — the reply lands in the sub-agent's thread (shown here), the main agent
-  // doesn't see it (see CLAUDE.md §3 Agents board: no auto loop-back to parent).
+  // doesn't see it — there is no auto loop-back to the parent agent.
   const [chatInput, setChatInput] = useState<Record<string, string>>({});
   const [chatBusy, setChatBusy] = useState<Record<string, boolean>>({});
   const [chatError, setChatError] = useState<Record<string, string | null>>({});

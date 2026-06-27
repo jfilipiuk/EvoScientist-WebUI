@@ -172,7 +172,7 @@ export function formatAsyncUpdateMessage(task: AsyncTaskReportTarget): string {
 }
 
 // Theme dot + label + pulse per status. CSS vars referenced via arbitrary-value
-// classes (the base's semantic bg tokens are dead in this fork — see CLAUDE.md).
+// classes (the base's semantic bg tokens are dead in this fork).
 // NOTE: never put a bracketed class literal in a comment (Tailwind scans those).
 export const ASYNC_STATUS_META: Record<
   AsyncAgentStatus,

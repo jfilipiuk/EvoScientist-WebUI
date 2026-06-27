@@ -21,7 +21,7 @@ const POLL_INTERVAL_MS = 10_000;
 const REQUEST_TIMEOUT_MS = 4_000;
 
 // Theme tokens (light + dark defined in globals.css). The base's shadcn
-// primary/secondary background tokens are dead in this fork (see CLAUDE.md), so
+// primary/secondary background tokens are dead in this fork, so
 // we reference CSS vars directly via arbitrary-value classes (the entries below).
 // NOTE: never put a bracketed class literal in a comment — Tailwind's content
 // scanner picks it up and emits real (sometimes invalid) CSS.

@@ -73,18 +73,20 @@ EvoScientist-WebUI/
   scripts/                   # assemble-standalone.mjs (packs dist/, strips *.map)
   src/
     app/
-      api/                   # thin same-origin server routes
-        evosci-config/       #   detect backend port
-        skills/              #   install / list / remove skills
-        memory/              #   read / edit global memory
-        workspace/           #   browse / edit / download files
-      components/            # React components (chat, panels, dialogs)
-      hooks/                 # useChat, useThreads, useAsyncAgents, …
-      page.tsx               # multi-view shell (routes via nuqs)
-    components/              # shared UI primitives
-    lib/                     # client + server helpers (asyncAgents, memory, …)
-      server/                # server-only fs helpers with path guards
-    providers/               # Theme / Client providers
+      api/                   # thin same-origin server routes (browser → local disk)
+        evosci-config/       #   detect backend port from EvoScientist config
+        skills/              #   list / install / uninstall + remote EvoSkills catalog
+        memory/              #   global memory CRUD + observation graph + executions
+        workspace/           #   browse / read / edit / upload / download-zip files
+      components/            # feature UI: chat, inspector, memory, schedule, skills, dialogs
+      hooks/                 # useChat, useThreads, useAsyncAgents, useScheduledTasks,
+                             #   useAvailableModels, useMemoryActivity, useAutoNotify
+      page.tsx               # three-column shell (thread · chat · inspector); nuqs routing
+    components/ui/            # shared shadcn/ui primitives
+    lib/                     # client helpers (asyncAgents, cronUtils, modelCommand,
+                             #   observationGraph, fileLink, summarization, …)
+      server/                # server-only fs helpers (workspace / memory / skills) w/ path guards
+    providers/               # ClientProvider (SDK) · ChatProvider · ThemeProvider
 ```
 
 ## Architecture & connection contract
@@ -95,7 +97,7 @@ Three independent layers:
 2. **Next `/api/` routes** (server tool layer, same-origin) — the reason distribution is `output: "standalone"` rather than a static export.
 3. **Backend** (EvoScientist's `langgraph dev`, default port `6174`) — the anchor process: runs async agents, holds state, serves the SDK.
 
-The backend exposes graphs `EvoScientist` (main, UI-locked), `writing-agent`, `data-analysis-agent`, and the `evomemory` workers. The UI filters thread lists by `metadata.graph_id == "EvoScientist"` so worker/sub-agent threads stay hidden.
+The backend exposes graphs `EvoScientist` (main, UI-locked), `writing-agent`, `data-analysis-agent`, the `scheduler` graph (LangGraph crons behind **Scheduled Tasks**), and the `evomemory` workers. The UI filters thread lists by `metadata.graph_id == "EvoScientist"` so worker/sub-agent threads stay hidden.
 
 ## Code style
 

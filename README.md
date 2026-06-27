@@ -28,12 +28,17 @@
 
 ## ✨ Features
 
-- **💬 Streaming Chat** — Real-time responses with Markdown, GFM tables, code highlighting, and collapsible thinking/reasoning blocks.
+- **💬 Streaming Chat** — Real-time responses with Markdown, GFM tables, math (KaTeX), code highlighting, zoomable Mermaid diagrams, and collapsible thinking/reasoning blocks.
+- **🧬 Per-Thread Model Picker** — Switch models per conversation with the `/model` command or a clickable model pill; the choice is persisted to the thread and folded into the next run.
 - **👋 Human-in-the-Loop** — Approve / reject / edit tool calls, and answer the agent's structured questions (text + multiple-choice) inline.
 - **⚡ Per-Thread Auto-Approve** — Persisted per conversation; survives view and thread switches and reloads.
+- **⌨️ Message Queue** — Type while the agent is busy: queue, edit, reorder, steer, or drain follow-up messages without interrupting the active run.
 - **🤖 Sub-Agent Activity** — Live step tracking for sub-agents, rendered exactly like the main agent (tool calls + paired results + tables).
 - **🗂️ Workspace Browser** — Tree and by-type (Papers / Figures / Data / Code) views with preview, edit, download, and zip-all.
-- **🧠 Memory Browser** — View, edit, and manage EvoScientist's global cross-session memory, with "recently updated" highlights and a nav badge.
+- **🔗 Click-to-Open File Links** — File paths in agent output are clickable — open them straight from chat in a workspace or memory viewer.
+- **🧠 EvoMemory Browser** — EvoScientist's global cross-session memory across three tabs: **Identity** (editable profile files), **Knowledge** (an interactive force-directed observation graph), and **History** (execution + observation timeline).
+- **⏰ Scheduled Tasks** — Schedule recurring research runs (daily / weekly / monthly / custom cron) with a visual builder, templates, and Run-now — backed by LangGraph crons.
+- **📊 Research Dashboard** — The chat's empty state surfaces recent memory activity, scheduled tasks, threads, and files, with one-click jump-in.
 - **🔌 Skills Marketplace** — Install, update, and uninstall the official [EvoSkills](https://github.com/EvoScientist/EvoSkills) catalog with version detection and a detail dialog.
 - **📡 Agents Monitor Board** — Watch async background agents (writing / data-analysis) with real run status, live duration, and a side-chat for direct worker debugging.
 - **🔁 Async Agent Communication** — Optional per-thread auto-report loops finished background results back to the main agent.
@@ -43,6 +48,7 @@
 
 ## 📖 Table of Contents
 
+- [✨ Features](#-features)
 - [📦 Prerequisites](#-prerequisites)
 - [⚡ Quick Start](#-quick-start)
 - [🔑 Configuration](#-configuration)

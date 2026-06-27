@@ -10,8 +10,8 @@
 
   :root {
     /* App-specific color variables */
-    /* App-specific colors — warm "paper" palette in the Claude Code desktop
-       style. Light mode: ivory background, true-white cards, warm charcoal text. */
+    /* App-specific colors — warm "paper" palette. Light mode: ivory
+       background, true-white cards, warm charcoal text. */
     --color-primary: #33302a;
     --color-user-message: #0e5c6e;
     --color-user-message-bg: #e6f2f5;

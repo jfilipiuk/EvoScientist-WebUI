@@ -27,8 +27,8 @@ if (existsSync(PUBLIC)) {
 }
 
 // Next copies the whole project root into the standalone bundle. Prune it down
-// to just the runtime essentials (drops src/, configs, and local notes like
-// CLAUDE.md/AGENTS.md so they never get published).
+// to just the runtime essentials (drops src/, configs, and local notes so
+// they never get published).
 const KEEP = new Set([
   "server.js",
   ".next",
