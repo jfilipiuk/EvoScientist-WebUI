@@ -82,6 +82,26 @@ export async function deleteScheduledTask(cronId: string): Promise<void> {
   await client.crons.delete(cronId);
 }
 
+export async function updateScheduledTask(params: {
+  cronId: string;
+  name: string;
+  prompt: string;
+  schedule: string;
+}): Promise<{ task: ScheduledTask; oldTaskDeleted: boolean }> {
+  const task = await createScheduledTask({
+    name: params.name,
+    prompt: params.prompt,
+    schedule: params.schedule,
+  });
+
+  try {
+    await deleteScheduledTask(params.cronId);
+    return { task, oldTaskDeleted: true };
+  } catch {
+    return { task, oldTaskDeleted: false };
+  }
+}
+
 export async function runScheduledTaskNow(prompt: string): Promise<void> {
   const client = makeClient();
   if (!client) throw new Error("No EvoScientist deployment configured.");

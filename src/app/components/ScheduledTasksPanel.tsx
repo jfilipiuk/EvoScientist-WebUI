@@ -11,6 +11,7 @@ import {
   Clock,
   FlaskConical,
   Loader2,
+  Pencil,
   Play,
   Plus,
   RefreshCw,
@@ -38,6 +39,7 @@ import {
   createScheduledTask,
   deleteScheduledTask,
   runScheduledTaskNow,
+  updateScheduledTask,
   useScheduledTasks,
   type ScheduledTask,
 } from "@/app/hooks/useScheduledTasks";
@@ -69,7 +71,7 @@ const TEMPLATES: Template[] = [
     description: "Track new ML papers against your research preferences.",
     name: "Daily Papers",
     prompt:
-      "Summarise the latest ML papers from arXiv according to my research preferences with the paper-navigator skill. Focus on papers that are relevant to my current projects, explain why each one matters, and save the summary to /memories/daily-papers.md.",
+      "Summarise the latest ML papers from arXiv according to my research preferences with the paper-navigator skill. Focus on papers that are relevant to my current projects, explain why each one matters, and save the summary to ./daily-papers.md in the current workspace.",
     schedule: "0 9 * * *",
   },
   {
@@ -79,7 +81,7 @@ const TEMPLATES: Template[] = [
       "Summarise this week's research progress and future direction.",
     name: "Weekly Research Review",
     prompt:
-      "Summarise this week's research progress across my active projects. Highlight key results, decisions, blockers, open questions, and what changed in my understanding. Then propose future research directions and concrete next steps. Save the review to /memories/weekly-research-review.md and update any relevant project memory.",
+      "Summarise this week's research progress across my active projects. Highlight key results, decisions, blockers, open questions, and what changed in my understanding. Then propose future research directions and concrete next steps. Save the review to ./weekly-research-review.md in the current workspace.",
     schedule: "0 17 * * 5",
   },
   {
@@ -88,7 +90,7 @@ const TEMPLATES: Template[] = [
     description: "Draft a Monday plan for the week's research priorities.",
     name: "Weekly Research Plan",
     prompt:
-      "Draft this week's research plan based on my active projects, recent progress, project memories, and open questions. Prioritise the most important research goals, propose concrete experiments or reading tasks, identify risks, and write a practical schedule for the week. Save the plan to /memories/weekly-research-plan.md.",
+      "Draft this week's research plan based on my active projects, recent progress, project files, and open questions. Prioritise the most important research goals, propose concrete experiments or reading tasks, identify risks, and write a practical schedule for the week. Save the plan to ./weekly-research-plan.md in the current workspace.",
     schedule: "0 8 * * 1",
   },
   {
@@ -97,7 +99,7 @@ const TEMPLATES: Template[] = [
     description: "Convert open questions into testable experiment ideas.",
     name: "Experiment Backlog",
     prompt:
-      "Review my active project memories, recent research notes, and open questions. Turn the most important unresolved ideas into a prioritised experiment backlog with hypotheses, expected signal, required data or code, estimated effort, and success criteria. Save it to /memories/experiment-backlog.md.",
+      "Review my active project files, recent research notes, and open questions. Turn the most important unresolved ideas into a prioritised experiment backlog with hypotheses, expected signal, required data or code, estimated effort, and success criteria. Save it to ./experiment-backlog.md in the current workspace.",
     schedule: "0 10 * * 2",
   },
 ];
@@ -349,15 +351,28 @@ function TemplateButton({ template, onSelect, compact }: TemplateButtonProps) {
 
 interface CreateFormProps {
   initialTemplate?: Template;
-  onCreated: () => void;
+  initialTask?: ScheduledTask;
+  onSaved: (task?: ScheduledTask) => void;
   onCancel: () => void;
 }
 
-function CreateForm({ initialTemplate, onCreated, onCancel }: CreateFormProps) {
-  const [name, setName] = useState(initialTemplate?.name ?? "");
-  const [prompt, setPrompt] = useState(initialTemplate?.prompt ?? "");
+function TaskForm({
+  initialTemplate,
+  initialTask,
+  onSaved,
+  onCancel,
+}: CreateFormProps) {
+  const isEditing = Boolean(initialTask);
+  const [name, setName] = useState(
+    initialTask?.name ?? initialTemplate?.name ?? ""
+  );
+  const [prompt, setPrompt] = useState(
+    initialTask?.prompt ?? initialTemplate?.prompt ?? ""
+  );
   const [spec, setSpec] = useState<ScheduleSpec>(() =>
-    initialTemplate
+    initialTask
+      ? cronToSpec(initialTask.schedule)
+      : initialTemplate
       ? cronToSpec(initialTemplate.schedule)
       : { ...DEFAULT_SCHEDULE_SPEC }
   );
@@ -390,16 +405,37 @@ function CreateForm({ initialTemplate, onCreated, onCancel }: CreateFormProps) {
 
     setSaving(true);
     try {
-      await createScheduledTask({
-        name: name.trim(),
-        prompt: prompt.trim(),
-        schedule: cron,
-      });
-      toast.success(`"${name.trim()}" scheduled.`);
-      onCreated();
+      if (initialTask) {
+        const result = await updateScheduledTask({
+          cronId: initialTask.cron_id,
+          name: name.trim(),
+          prompt: prompt.trim(),
+          schedule: cron,
+        });
+        if (result.oldTaskDeleted) {
+          toast.success(`"${name.trim()}" updated.`);
+        } else {
+          toast.warning(
+            `"${name.trim()}" was saved, but the old scheduled task could not be removed.`
+          );
+        }
+        onSaved(result.task);
+      } else {
+        await createScheduledTask({
+          name: name.trim(),
+          prompt: prompt.trim(),
+          schedule: cron,
+        });
+        toast.success(`"${name.trim()}" scheduled.`);
+        onSaved();
+      }
     } catch (err) {
       toast.error(
-        err instanceof Error ? err.message : "Failed to create scheduled task."
+        err instanceof Error
+          ? err.message
+          : isEditing
+          ? "Failed to update scheduled task."
+          : "Failed to create scheduled task."
       );
     } finally {
       setSaving(false);
@@ -424,7 +460,9 @@ function CreateForm({ initialTemplate, onCreated, onCancel }: CreateFormProps) {
           />
         </button>
         <div className="min-w-0 flex-1">
-          <h2 className="truncate text-sm font-semibold">New scheduled task</h2>
+          <h2 className="truncate text-sm font-semibold">
+            {isEditing ? "Edit scheduled task" : "New scheduled task"}
+          </h2>
           <p className="truncate text-xs text-muted-foreground">
             EvoScientist will run this task description unattended.
           </p>
@@ -488,10 +526,12 @@ function CreateForm({ initialTemplate, onCreated, onCancel }: CreateFormProps) {
         >
           {saving ? (
             <Loader2 className="size-3.5 animate-spin" />
+          ) : isEditing ? (
+            <Pencil className="size-3.5" />
           ) : (
             <Plus className="size-3.5" />
           )}
-          Create task
+          {isEditing ? "Save changes" : "Create task"}
         </Button>
       </div>
     </form>
@@ -501,10 +541,11 @@ function CreateForm({ initialTemplate, onCreated, onCancel }: CreateFormProps) {
 interface TaskDetailProps {
   task: ScheduledTask;
   onBack: () => void;
+  onEdit: () => void;
   onDeleted: () => void;
 }
 
-function TaskDetail({ task, onBack, onDeleted }: TaskDetailProps) {
+function TaskDetail({ task, onBack, onEdit, onDeleted }: TaskDetailProps) {
   const [running, setRunning] = useState(false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -634,16 +675,27 @@ function TaskDetail({ task, onBack, onDeleted }: TaskDetailProps) {
           <p className="hidden truncate text-xs text-muted-foreground sm:block">
             Manual runs create a scheduler thread immediately.
           </p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setDeleteOpen(true)}
-            aria-label={`Delete scheduled task "${task.name}"`}
-            className="ml-auto text-destructive hover:border-destructive hover:text-destructive"
-          >
-            <Trash2 className="size-3.5" />
-            Delete
-          </Button>
+          <div className="ml-auto flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onEdit}
+              aria-label={`Edit scheduled task "${task.name}"`}
+            >
+              <Pencil className="size-3.5" />
+              Edit
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setDeleteOpen(true)}
+              aria-label={`Delete scheduled task "${task.name}"`}
+              className="text-destructive hover:border-destructive hover:text-destructive"
+            >
+              <Trash2 className="size-3.5" />
+              Delete
+            </Button>
+          </div>
         </div>
       </div>
 
@@ -738,6 +790,7 @@ function TaskRow({
 type RightPane =
   | { kind: "empty" }
   | { kind: "create"; template?: Template; createId: number }
+  | { kind: "edit"; task: ScheduledTask; editId: number }
   | { kind: "detail"; task: ScheduledTask };
 
 export function ScheduledTasksPanel() {
@@ -745,6 +798,10 @@ export function ScheduledTasksPanel() {
   const [right, setRight] = useState<RightPane>({ kind: "empty" });
   const [query, setQuery] = useState("");
   const createIdRef = useRef(0);
+  const editIdRef = useRef(0);
+  // Holds the cron_id of a just-saved task while the list refresh is in flight.
+  // The sync effect below won't navigate away while this id is pending.
+  const pendingTaskIdRef = useRef<string | null>(null);
 
   const sortedTasks = useMemo(() => sortTasks(tasks), [tasks]);
   const filteredTasks = useMemo(() => {
@@ -757,21 +814,46 @@ export function ScheduledTasksPanel() {
   const nextTask = sortedTasks.find((task) => task.next_run_date);
   const selectedTaskId = right.kind === "detail" ? right.task.cron_id : null;
 
+  // Keep detail pane in sync with the task list.
+  // While a refresh is in flight, hold position so a just-saved task's new
+  // cron_id (not yet in the list) doesn't trigger premature navigation to empty.
+  // Once loading finishes we clear the pending guard and evaluate normally.
   useEffect(() => {
     if (!selectedTaskId) return;
+    if (loading) return;
     const updated = tasks.find((task) => task.cron_id === selectedTaskId);
-    setRight(updated ? { kind: "detail", task: updated } : { kind: "empty" });
-  }, [selectedTaskId, tasks]);
+    if (updated) {
+      if (pendingTaskIdRef.current === selectedTaskId) {
+        pendingTaskIdRef.current = null;
+      }
+      setRight({ kind: "detail", task: updated });
+      return;
+    }
+    if (pendingTaskIdRef.current === selectedTaskId && !error) {
+      return;
+    }
+    pendingTaskIdRef.current = null;
+    setRight({ kind: "empty" });
+  }, [error, loading, selectedTaskId, tasks]);
 
   const openCreate = useCallback((template?: Template) => {
     createIdRef.current += 1;
     setRight({ kind: "create", template, createId: createIdRef.current });
   }, []);
 
-  const handleCreated = useCallback(() => {
-    refresh();
-    setRight({ kind: "empty" });
-  }, [refresh]);
+  const openEdit = useCallback((task: ScheduledTask) => {
+    editIdRef.current += 1;
+    setRight({ kind: "edit", task, editId: editIdRef.current });
+  }, []);
+
+  const handleSaved = useCallback(
+    (task?: ScheduledTask) => {
+      pendingTaskIdRef.current = task?.cron_id ?? null;
+      refresh();
+      setRight(task ? { kind: "detail", task } : { kind: "empty" });
+    },
+    [refresh]
+  );
 
   const handleDeleted = useCallback(() => {
     refresh();
@@ -1014,11 +1096,20 @@ export function ScheduledTasksPanel() {
           )}
 
           {right.kind === "create" && (
-            <CreateForm
+            <TaskForm
               key={right.createId}
               initialTemplate={right.template}
-              onCreated={handleCreated}
+              onSaved={handleSaved}
               onCancel={() => setRight({ kind: "empty" })}
+            />
+          )}
+
+          {right.kind === "edit" && (
+            <TaskForm
+              key={right.editId}
+              initialTask={right.task}
+              onSaved={handleSaved}
+              onCancel={() => setRight({ kind: "detail", task: right.task })}
             />
           )}
 
@@ -1026,6 +1117,7 @@ export function ScheduledTasksPanel() {
             <TaskDetail
               task={right.task}
               onBack={() => setRight({ kind: "empty" })}
+              onEdit={() => openEdit(right.task)}
               onDeleted={handleDeleted}
             />
           )}
