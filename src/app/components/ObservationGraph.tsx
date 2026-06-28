@@ -153,10 +153,17 @@ function NodeDetailPanel({
     return () => controller.abort();
   }, [node.path]);
 
-  // Edges involving this node.
-  const relatedEdges = edges.filter(
-    (e) => e.source === node.id || e.target === node.id
-  );
+  const relatedEdges = (() => {
+    const seen = new Set<string>();
+    return edges.filter((e) => {
+      if (e.source !== node.id && e.target !== node.id) return false;
+      const otherId = e.source === node.id ? e.target : e.source;
+      const key = `${otherId}::${e.relation}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  })();
   const displayContent = content ? stripFrontMatter(content) : "";
 
   const formatDate = (iso: string) => {
@@ -289,7 +296,17 @@ interface GraphCanvasProps {
 }
 
 function GraphCanvas({ data, selectedId, onSelect, w, h }: GraphCanvasProps) {
-  const positions = useForceSimulation(data.nodes, data.edges, w, h);
+  const physicsEdges = useMemo(() => {
+    const seen = new Set<string>();
+    return data.edges.filter((e) => {
+      const key = [e.source, e.target].sort().join("::");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [data.edges]);
+
+  const positions = useForceSimulation(data.nodes, physicsEdges, w, h);
 
   // Zoom / pan state.
   const [tx, setTx] = useState(0);
