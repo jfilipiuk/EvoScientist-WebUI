@@ -1075,8 +1075,8 @@ export function ScheduledTasksPanel() {
                   />
                   <p className="text-sm font-medium">Pick a scheduled task</p>
                   <p className="text-xs text-muted-foreground">
-                    View details, run it manually, or create another recurring
-                    research job.
+                    Pick a template below, or ask EvoScientist in chat to create
+                    a recurring task.
                   </p>
                 </div>
                 {tasks.length > 0 && (

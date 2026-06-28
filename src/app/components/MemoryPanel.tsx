@@ -1,13 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  BrainCircuit,
-  Network,
-  Fingerprint,
-  History,
-  RefreshCw,
-} from "lucide-react";
+import { Network, Fingerprint, History, RefreshCw } from "lucide-react";
 import { setMemorySeenAt } from "@/lib/memoryActivity";
 import { ObservationGraph } from "@/app/components/ObservationGraph";
 import { IdentityTab } from "@/app/components/IdentityTab";
@@ -214,14 +208,8 @@ export function MemoryPanel({
     <div className="flex h-full flex-col overflow-hidden">
       <header className="flex flex-shrink-0 items-start justify-between gap-3 border-b border-border px-4 py-3 sm:px-5">
         <div className="min-w-0">
-          <div className="flex items-center gap-2">
-            <BrainCircuit
-              className="size-5 text-[var(--brand)]"
-              aria-hidden="true"
-            />
-            <h2 className="text-xl font-semibold">EvoMemory</h2>
-          </div>
-          <p className="mt-1 text-sm text-muted-foreground">
+          <h2 className="text-xl font-semibold sm:text-2xl">EvoMemory</h2>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">
             EvoScientist&apos;s{" "}
             <span className="font-medium text-[var(--brand)]">
               self-evolving memory system
