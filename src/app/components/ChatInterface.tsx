@@ -1435,6 +1435,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                     <li key={`${m.model}|${m.model_provider ?? ""}`}>
                       <button
                         type="button"
+                        aria-label={`Select model ${m.model}${
+                          m.model_provider ? ` from ${m.model_provider}` : ""
+                        }${isDefault ? " (default)" : ""}`}
                         onClick={async () => {
                           try {
                             await setModelOverride({
@@ -1458,11 +1461,11 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                           }
                         }}
                         className={cn(
-                          "flex w-full items-center justify-between rounded px-3 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+                          "flex w-full items-center justify-between gap-3 rounded px-3 py-2 text-left text-sm transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
                           isActive && "bg-accent"
                         )}
                       >
-                        <span className="font-mono">
+                        <span className="min-w-0 truncate font-mono">
                           {m.model}
                           {isDefault && (
                             <span className="ml-2 text-xs font-normal text-muted-foreground">
@@ -1471,7 +1474,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                           )}
                         </span>
                         {m.model_provider && (
-                          <span className="text-xs text-muted-foreground">
+                          <span className="shrink-0 text-xs text-muted-foreground">
                             {m.model_provider}
                           </span>
                         )}

@@ -67,18 +67,21 @@ const FINISH_REASON_SUCCESS = new Set([
   "tool_use",
 ]);
 
-// A duplicated terminal SSE chunk makes langchain's `merge_dicts` concatenate
-// `finish_reason` with itself ("stopstop"), so a successful turn reads as an
-// abnormal one. Backends carrying EvoScientist#313 no longer do this; older
-// ones do, and the WebUI ships separately via npm `@latest`.
+// Two ways a successful turn can read as an abnormal one. Providers disagree on
+// case — Gemini and Vertex send "STOP" / "MAX_TOKENS". And a duplicated terminal
+// SSE chunk makes langchain's `merge_dicts` concatenate `finish_reason` with
+// itself ("stopstop"), which the live backend still emits more often than the
+// plain form. Fold both away before consulting the success set.
 function normalizeFinishReason(raw: string): string {
+  const lowered = raw.toLowerCase();
   for (const value of FINISH_REASON_SUCCESS) {
-    if (raw !== value && raw.length % value.length === 0) {
-      const repeatCount = raw.length / value.length;
-      if (repeatCount > 1 && value.repeat(repeatCount) === raw) return value;
+    if (lowered !== value && lowered.length % value.length === 0) {
+      const repeatCount = lowered.length / value.length;
+      if (repeatCount > 1 && value.repeat(repeatCount) === lowered)
+        return value;
     }
   }
-  return raw;
+  return lowered;
 }
 
 export const ChatMessage = React.memo<ChatMessageProps>(
@@ -118,13 +121,13 @@ export const ChatMessage = React.memo<ChatMessageProps>(
         message.response_metadata as Record<string, unknown> | undefined
       )?.finish_reason;
       if (typeof raw !== "string" || !raw) return null;
-      const finishReason = normalizeFinishReason(raw);
-      if (FINISH_REASON_SUCCESS.has(finishReason)) return null;
+      if (FINISH_REASON_SUCCESS.has(normalizeFinishReason(raw))) return null;
       const variant =
         !hasContent && !hasToolCalls
           ? ("missing" as const)
           : ("partial" as const);
-      return { finishReason, variant };
+      // Show what the provider actually sent, not the folded form.
+      return { finishReason: raw, variant };
     }, [isUser, hasContent, hasToolCalls, message.response_metadata]);
     const subAgents = useMemo(() => {
       return toolCalls

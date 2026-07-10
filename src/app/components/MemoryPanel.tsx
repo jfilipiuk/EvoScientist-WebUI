@@ -252,7 +252,7 @@ export function MemoryPanel({
       </header>
 
       <div
-        className="flex flex-shrink-0 items-center gap-1 border-b border-border px-3 pt-1"
+        className="grid flex-shrink-0 grid-cols-3 gap-1 border-b border-border px-2 pt-1 sm:flex sm:items-center sm:px-3"
         role="tablist"
         aria-label="Memory views"
       >
@@ -264,7 +264,7 @@ export function MemoryPanel({
             aria-selected={activeTab === id}
             onClick={() => handleTabClick(id)}
             className={cn(
-              "flex items-center gap-1.5 rounded-t-md border-b-2 px-3 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring",
+              "flex min-w-0 items-center justify-center gap-1 rounded-t-md border-b-2 px-1.5 py-2 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring sm:gap-1.5 sm:px-3 sm:text-sm",
               activeTab === id
                 ? "border-[var(--brand)] bg-accent text-foreground"
                 : "border-transparent text-muted-foreground hover:bg-accent hover:text-foreground"
