@@ -13,8 +13,20 @@ export default defineConfig({
     coverage: {
       provider: "v8",
       reporter: ["text", "html"],
-      include: ["src/lib/**/*.ts"],
-      exclude: ["src/lib/**/*.test.ts", "src/lib/server/**"],
+      // Widen beyond src/lib so component + hook tests actually get counted.
+      // Server-only helpers and generated stubs are out of scope.
+      include: [
+        "src/lib/**/*.ts",
+        "src/app/hooks/**/*.ts",
+        "src/app/components/**/*.tsx",
+        "src/providers/**/*.tsx",
+      ],
+      exclude: [
+        "src/**/*.test.ts",
+        "src/**/*.test.tsx",
+        "src/lib/server/**",
+        "src/test/**",
+      ],
     },
   },
   resolve: {

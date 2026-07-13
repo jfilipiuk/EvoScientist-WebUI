@@ -107,6 +107,7 @@ import {
 } from "@/test/mocks/chatInterfaceStubs";
 import { humanTurn, aiTurn, aiToolCallTurn } from "@/test/fixtures/messages";
 import { executeInterrupt, askUserInterrupt } from "@/test/fixtures/interrupts";
+import { setThreadAutoApprove } from "@/lib/autoApprove";
 
 describe("ChatInterface composition", () => {
   let stream: MockStreamStore;
@@ -224,19 +225,20 @@ describe("ChatInterface composition", () => {
   });
 
   it("flows autoApprove state from thread-local storage into ActionGroup props", () => {
-    // No thread active yet (null threadId). Auto-approve for the pending
-    // new chat defaults to off (per autoNotify.test.ts semantics mirrored
-    // in autoApprove.ts). Verify ActionGroup sees autoApprove=false.
+    // Seed storage BEFORE mount so ChatInterface's initial useState reads
+    // the persisted value. threadId is null on a fresh chat -> the sentinel
+    // "__new__" key holds the pending-new-chat setting.
+    setThreadAutoApprove(null, true);
+
     renderChatInterface();
     act(() => {
       stream.setMessages([aiToolCallTurn("execute", { command: "ls" }, "t1")]);
       stream.setInterrupt(executeInterrupt("ls"));
     });
+
     const passes = getAllProps<{ autoApprove: boolean }>("ActionGroup");
     expect(passes.length).toBeGreaterThan(0);
-    // Every render of the ActionGroup for this test should see autoApprove=false.
-    for (const p of passes) {
-      expect(p.autoApprove).toBe(false);
-    }
+    // The prop that ActionGroup ends up seeing reflects the seeded storage.
+    expect(passes[passes.length - 1].autoApprove).toBe(true);
   });
 });

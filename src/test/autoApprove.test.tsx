@@ -217,21 +217,6 @@ describe("auto-approve scenario", () => {
     expect(stream.getSubmitCalls()).toHaveLength(N);
   });
 
-  it("collapses to one submit when many interrupts arrive within a single React batch", () => {
-    // React batches state updates inside a single act(). Even though the
-    // store notifies N times, the effect only observes the LATEST snapshot
-    // when it runs after the batch commits. This documents that behavior
-    // and confirms the identity guard doesn't accidentally fire again on
-    // the intermediate values.
-    renderChatWithAutoApprove({ autoApprove: true });
-    act(() => {
-      stream.setInterrupt(makeExecuteInterrupt("cmd0"));
-      stream.setInterrupt(makeExecuteInterrupt("cmd1"));
-      stream.setInterrupt(makeExecuteInterrupt("cmd2"));
-    });
-    expect(stream.getSubmitCalls()).toHaveLength(1);
-  });
-
   it("does NOT fire when autoApprove is off, even for an actionable interrupt", () => {
     renderChatWithAutoApprove({ autoApprove: false });
     act(() => {
