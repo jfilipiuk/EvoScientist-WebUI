@@ -52,7 +52,6 @@ import type {
 import { Assistant, Message } from "@langchain/langgraph-sdk";
 import { extractStringFromMessageContent } from "@/app/utils/utils";
 import { useChatContext } from "@/providers/ChatProvider";
-import { interruptValueKey } from "@/app/hooks/useChat";
 import { cn } from "@/lib/utils";
 import { formatModel } from "@/lib/model";
 import {
@@ -72,6 +71,7 @@ import {
 } from "@/lib/asyncAgents";
 import { useAsyncAgents } from "@/app/hooks/useAsyncAgents";
 import { useAutoNotify } from "@/app/hooks/useAutoNotify";
+import { useAutoApproveInterrupt } from "@/app/hooks/useAutoApproveInterrupt";
 import {
   getThreadAutoNotifyReportedKeys,
   initializeThreadAutoNotifyReports,
@@ -385,17 +385,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
         );
       });
     }, [pickerModels, modelSearch]);
-    // Set of interrupt-id keys already auto-approved this session. Never
-    // cleared except on thread switch and turnOffAutoApprove: interrupt ids
-    // are backend-generated per logical interrupt, so re-observing a past-
-    // approved id means the SDK is still holding pre-resume state (tail-
-    // state recovery, `values.__interrupt__` getter churn, brief mid-submit
-    // reappearance) - all cases that should NOT trigger a duplicate approve.
-    // A different logical interrupt has a different id, misses the Set, and
-    // legitimately fires. A Set (not a single-slot ref) makes any unintended
-    // "reset" from an upstream state change a no-op unless we deliberately
-    // clear it.
-    const autoApprovedIdsRef = useRef<Set<string>>(new Set());
     const previousThreadIdRef = useRef(threadId);
     const migrateAutoApproveForCreatedThreadRef = useRef(false);
     const { scrollRef, contentRef, scrollToBottom, isAtBottom } =
@@ -732,7 +721,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       setAutoApproveState(false);
       setThreadAutoApprove(threadId, false);
       setAutoApproveDialogOpen(false);
-      autoApprovedIdsRef.current = new Set();
     }, [threadId]);
 
     // Follow the thread: when the active thread changes, load THAT thread's saved
@@ -755,7 +743,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       }
 
       setAutoApproveState(getThreadAutoApprove(threadId));
-      autoApprovedIdsRef.current = new Set();
       setAutoApproveDialogOpen(false);
       setPendingFiles([]);
       migrateAutoApproveForCreatedThreadRef.current = false;
@@ -1020,33 +1007,15 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
 
     // Auto-approve: when enabled, approve any pending tool-execution interrupt
     // for the rest of this conversation (each interrupt is handled once,
-    // keyed by `Interrupt.id`).
-    useEffect(() => {
-      if (!autoApprove) return;
-      // The SDK's `start()` early-returns when `isLoading` is already true,
-      // silently swallowing our resume - the promise resolves fine, but no
-      // HTTP goes out. This races with SSE arrival: a new interrupt lands in
-      // `values.__interrupt__` and the effect fires before the SDK's `finally`
-      // has flipped `isLoading` to false. Wait for the transition; the effect
-      // re-runs when `isLoading` changes (it's in deps).
-      if (isLoading) return;
-      const ir = interrupt;
-      const actionRequests =
-        ir?.value && ((ir.value as any)["action_requests"] as unknown[]);
-      if (
-        !ir ||
-        !Array.isArray(actionRequests) ||
-        actionRequests.length === 0
-      ) {
-        return;
-      }
-      const key = interruptValueKey(ir);
-      if (key === null || autoApprovedIdsRef.current.has(key)) return;
-      autoApprovedIdsRef.current.add(key);
-      resumeInterrupt({
-        decisions: actionRequests.map(() => ({ type: "approve" })),
-      });
-    }, [autoApprove, interrupt, resumeInterrupt, isLoading]);
+    // keyed by interruptValueKey; the isLoading gate avoids the SDK-swallowed
+    // resume race documented in the hook).
+    useAutoApproveInterrupt({
+      autoApprove,
+      interrupt,
+      resumeInterrupt,
+      isLoading,
+      resetKey: threadId,
+    });
 
     // ask_user: the agent is asking the user structured questions.
     const askUserQuestions = useMemo<AskUserQuestion[] | null>(() => {

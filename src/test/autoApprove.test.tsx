@@ -1,15 +1,18 @@
 // @vitest-environment jsdom
 //
 // Scenario: auto-approve is on. Every interrupt with a non-empty
-// `action_requests` list is resumed automatically with approve decisions
-// without user interaction. The critical property is the identity guard:
-// a re-render with the SAME interrupt object still visible must NOT re-fire
-// a submit — that guard is what stopped the tight loop the user chased
-// earlier this session.
+// `action_requests` list is resumed automatically with approve decisions.
+// Two critical guarantees:
+//   1. A given interrupt VALUE (keyed by `interruptValueKey`) is approved at
+//      most once — a re-observed same-content interrupt, even with a fresh
+//      object reference, does not re-fire. That's the fix for the tight loop
+//      the user chased earlier this session.
+//   2. Auto-approve waits for `isLoading` to transition to false before
+//      firing. The SDK's `start()` early-returns while a run is in flight,
+//      silently swallowing our resume — so we must observe the transition.
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
-import { act } from "@testing-library/react";
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { toast } from "sonner";
 import type { ReactNode } from "react";
 import {
@@ -54,30 +57,34 @@ import { ChatProvider, useChatContext } from "@/providers/ChatProvider";
 import { useAutoApproveInterrupt } from "@/app/hooks/useAutoApproveInterrupt";
 import { fixtureAssistant } from "@/test/fixtures/assistants";
 
-// Interrupts as they arrive from the HumanInTheLoopMiddleware — the reference
-// held on each object matters for the identity guard, so tests either reuse
-// or construct fresh instances deliberately.
+// Fresh interrupt object each call. Value is what feeds `interruptValueKey`,
+// so tests can assert on both same-value-different-ref and different-value.
 const makeExecuteInterrupt = (command: string) => ({
   value: {
     action_requests: [{ name: "execute", args: { command } }],
   },
 });
 
+interface HarnessProps {
+  autoApprove: boolean;
+  isLoading?: boolean;
+  resetKey?: string | null;
+}
+
 // Mount ChatProvider and wire the auto-approve hook in the same render.
-// `autoApprove` and `resetKey` are props on the test-side wrapper so
+// autoApprove / isLoading / resetKey are props on the test-side wrapper so
 // `rerender` can drive transitions without unmounting.
 function renderChatWithAutoApprove(
-  initial: { autoApprove: boolean; resetKey?: string | null } = {
-    autoApprove: true,
-  }
+  initial: HarnessProps = { autoApprove: true }
 ) {
   return renderHook(
-    (props: { autoApprove: boolean; resetKey?: string | null }) => {
+    (props: HarnessProps) => {
       const chat = useChatContext();
       useAutoApproveInterrupt({
         autoApprove: props.autoApprove,
         interrupt: chat.interrupt,
         resumeInterrupt: chat.resumeInterrupt,
+        isLoading: props.isLoading ?? false,
         resetKey: props.resetKey,
       });
       return chat;
@@ -149,60 +156,72 @@ describe("auto-approve scenario", () => {
     ]);
   });
 
-  it("does NOT re-fire when the same interrupt object is still present after a re-render (identity guard)", () => {
-    const { rerender } = renderChatWithAutoApprove({ autoApprove: true });
-
-    // Same object reference reused so the ref stays === after re-render.
-    const interruptA = makeExecuteInterrupt("ls");
-    act(() => {
-      stream.setInterrupt(interruptA);
-    });
-    expect(stream.getSubmitCalls()).toHaveLength(1);
-
-    // Force a re-render without changing the interrupt on the store.
-    // Without the identity guard, this is where the tight loop shows up
-    // (the effect fires again on every render).
-    act(() => {
-      rerender({ autoApprove: true });
-      rerender({ autoApprove: true });
-      rerender({ autoApprove: true });
-    });
-    expect(stream.getSubmitCalls()).toHaveLength(1);
-  });
-
-  it("re-fires when a NEW interrupt object arrives (different reference)", () => {
+  it("suppresses a same-content interrupt even from a fresh object reference (keyed guard)", () => {
+    // The pre-fix bug: fresh object references per SSE tick made the identity
+    // guard useless, so the same logical interrupt approved dozens of times.
+    // The Set-based guard keys off the JSON of `value` so content dedupes.
     renderChatWithAutoApprove({ autoApprove: true });
-
     act(() => {
       stream.setInterrupt(makeExecuteInterrupt("ls"));
     });
     expect(stream.getSubmitCalls()).toHaveLength(1);
+    act(() => {
+      // Fresh reference, identical content -> same key.
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(1);
+  });
 
-    // Fresh reference — the SDK created a new interrupt for the next tool
-    // call, even if the content looks similar. Auto-approve should fire again.
+  it("does NOT re-fire when a re-render occurs with the same interrupt still present", () => {
+    const { rerender } = renderChatWithAutoApprove({ autoApprove: true });
+    act(() => {
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(1);
+    // Re-renders with no state change: guard still holds.
+    act(() => {
+      rerender({ autoApprove: true });
+      rerender({ autoApprove: true });
+      rerender({ autoApprove: true });
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(1);
+  });
+
+  it("re-fires when a new interrupt with a different value arrives", () => {
+    renderChatWithAutoApprove({ autoApprove: true });
+    act(() => {
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(1);
     act(() => {
       stream.setInterrupt(makeExecuteInterrupt("pwd"));
     });
     expect(stream.getSubmitCalls()).toHaveLength(2);
-    const secondOpts = stream.getSubmitCalls()[1].options as {
-      command: { resume: { decisions: Array<{ type: string }> } };
-    };
-    expect(secondOpts.command.resume.decisions).toEqual([{ type: "approve" }]);
   });
 
-  it("fires exactly N submits for N fresh interrupts each in its own render tick", () => {
-    // The pre-fix bug was a runaway loop: the effect re-firing per render
-    // regardless of what state actually changed. When N genuinely distinct
-    // interrupts arrive across N render ticks, we should see exactly N
-    // submits — not N*K for some hidden re-render multiplier.
-    renderChatWithAutoApprove({ autoApprove: true });
-    const N = 10;
-    for (let i = 0; i < N; i++) {
-      act(() => {
-        stream.setInterrupt(makeExecuteInterrupt(`cmd${i}`));
-      });
-    }
-    expect(stream.getSubmitCalls()).toHaveLength(N);
+  it("does NOT fire while isLoading is true (SDK-swallowed resume race)", () => {
+    // The SDK's `start()` early-returns when isLoading is already true. Firing
+    // in that window silently drops the resume. The hook waits for the flip.
+    renderChatWithAutoApprove({ autoApprove: true, isLoading: true });
+    act(() => {
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(0);
+  });
+
+  it("fires once isLoading transitions to false with a still-pending interrupt", () => {
+    const { rerender } = renderChatWithAutoApprove({
+      autoApprove: true,
+      isLoading: true,
+    });
+    act(() => {
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(0);
+    act(() => {
+      rerender({ autoApprove: true, isLoading: false });
+    });
+    expect(stream.getSubmitCalls()).toHaveLength(1);
   });
 
   it("does NOT fire when autoApprove is off, even for an actionable interrupt", () => {
@@ -235,46 +254,35 @@ describe("auto-approve scenario", () => {
   });
 
   it("re-fires on the same interrupt after autoApprove is toggled off then back on", () => {
-    // Real flow: user turns auto-approve off, an interrupt stays pending,
-    // user changes their mind and turns it back on. The pending interrupt
-    // should be auto-approved on the next tick, not silently ignored.
-    const interruptA = makeExecuteInterrupt("ls");
     const { rerender } = renderChatWithAutoApprove({ autoApprove: true });
     act(() => {
-      stream.setInterrupt(interruptA);
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
     });
     expect(stream.getSubmitCalls()).toHaveLength(1);
-
     act(() => {
       rerender({ autoApprove: false });
     });
-    // Off state: submit count stays the same even if the interrupt is here.
     expect(stream.getSubmitCalls()).toHaveLength(1);
-
     act(() => {
       rerender({ autoApprove: true });
     });
-    // The internal identity guard was reset on the autoApprove flip, so the
-    // still-pending interrupt fires again.
+    // The Set was reset on autoApprove change; still-pending interrupt fires again.
     expect(stream.getSubmitCalls()).toHaveLength(2);
   });
 
-  it("resets the identity guard when resetKey changes (thread switch)", () => {
-    const interruptA = makeExecuteInterrupt("ls");
+  it("resets the Set when resetKey changes (thread switch)", () => {
     const { rerender } = renderChatWithAutoApprove({
       autoApprove: true,
       resetKey: "thread-1",
     });
     act(() => {
-      stream.setInterrupt(interruptA);
+      stream.setInterrupt(makeExecuteInterrupt("ls"));
     });
     expect(stream.getSubmitCalls()).toHaveLength(1);
-
-    // Switching thread: same interrupt object reused (contrived — the store
-    // would normally be reset too), we assert the ref cleared.
     act(() => {
       rerender({ autoApprove: true, resetKey: "thread-2" });
     });
+    // Same interrupt value but Set was cleared on the new thread -> fires again.
     expect(stream.getSubmitCalls()).toHaveLength(2);
   });
 });

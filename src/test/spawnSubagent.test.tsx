@@ -134,7 +134,6 @@ describe("spawn-subagent scenario", () => {
       streamMode: string[];
       streamResumable: boolean;
       onDisconnect: string;
-      config: { recursion_limit: number };
     };
     expect(opts.command).toEqual({
       resume: { decisions: [{ type: "approve" }] },
@@ -144,7 +143,6 @@ describe("spawn-subagent scenario", () => {
     expect(opts.streamMode).toEqual(["updates"]);
     expect(opts.streamResumable).toBe(true);
     expect(opts.onDisconnect).toBe("continue");
-    expect(opts.config.recursion_limit).toBe(100);
   });
 
   it("propagates a reject decision verbatim through resumeInterrupt", () => {

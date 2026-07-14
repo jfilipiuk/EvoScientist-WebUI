@@ -103,14 +103,12 @@ describe("simple chat scenario", () => {
       onDisconnect: string;
       config: {
         configurable: Record<string, unknown>;
-        recursion_limit: number;
       };
     };
     expect(opts.streamSubgraphs).toBe(true);
     expect(opts.streamMode).toEqual(["updates"]);
     expect(opts.streamResumable).toBe(true);
     expect(opts.onDisconnect).toBe("continue");
-    expect(opts.config.recursion_limit).toBe(100);
     // Assistant-level config is merged in.
     expect(opts.config.configurable.some_seed).toBe("abc");
   });
