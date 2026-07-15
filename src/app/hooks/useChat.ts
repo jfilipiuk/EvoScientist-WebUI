@@ -32,7 +32,11 @@ import {
   MODEL_OVERRIDE_METADATA_KEY,
   type ModelOverride,
 } from "@/lib/modelCommand";
-import { setThreadModelOverride } from "@/app/hooks/useThreads";
+import {
+  deriveThreadMetadata,
+  persistThreadDerivedMetadata,
+  setThreadModelOverride,
+} from "@/app/hooks/useThreads";
 
 export type StateType = {
   messages: Message[];
@@ -692,6 +696,45 @@ export function useChat({
   const stopStream = useCallback(() => {
     streamRef.current.stop();
   }, []);
+
+  // Precompute the sidebar labels ("auto_title" + "preview") into thread
+  // metadata whenever a run settles, so the sidebar can render off metadata
+  // alone. Fires only on the loading -> idle transition (not per-token), then
+  // no-ops via `lastWrittenRef` if the values match what was already written
+  // in this session. The persist call itself also compares against server
+  // metadata before writing, so this is safe across tabs/reloads too.
+  //
+  // Pre-existing threads (with neither metadata key set) get seeded by
+  // `scripts/backfill-thread-previews.mjs` once, so switching to them shows
+  // the right labels immediately even before they get a new turn.
+  const prevLoadingRef = useRef(false);
+  const lastWrittenRef = useRef<{
+    threadId: string;
+    autoTitle: string | null;
+    preview: string | null;
+  } | null>(null);
+  useEffect(() => {
+    const wasLoading = prevLoadingRef.current;
+    prevLoadingRef.current = stream.isLoading;
+    if (!wasLoading || stream.isLoading || !threadId) return;
+    const derived = deriveThreadMetadata(messages);
+    if (!derived.autoTitle && !derived.preview) return;
+    const last = lastWrittenRef.current;
+    if (
+      last &&
+      last.threadId === threadId &&
+      last.autoTitle === derived.autoTitle &&
+      last.preview === derived.preview
+    ) {
+      return;
+    }
+    lastWrittenRef.current = { threadId, ...derived };
+    void persistThreadDerivedMetadata(threadId, derived)
+      .then(() => onHistoryRevalidate?.())
+      .catch(() => {
+        // Non-critical: sidebar label just stays stale until the next turn.
+      });
+  }, [stream.isLoading, threadId, messages, onHistoryRevalidate]);
 
   return {
     stream,

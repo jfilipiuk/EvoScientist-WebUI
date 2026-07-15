@@ -97,79 +97,54 @@ export function useThreads(props: {
       const threads = await client.threads.search({
         limit: pageSize,
         offset: pageIndex * pageSize,
-        sortBy: "updated_at" as const,
+        // Sort by state_updated_at (last checkpoint write, i.e. last actual
+        // chat activity) rather than updated_at. Any metadata patch
+        // (rename/pin/preview writeback/backfill script) bumps updated_at,
+        // which would resurface stale threads at the top of the list.
+        // state_updated_at only advances on genuine graph state changes.
+        sortBy: "state_updated_at" as const,
         sortOrder: "desc" as const,
         status,
         metadata,
+        // Sidebar payload minimization: never fetch `values` (full message
+        // history, easily tens of MB across a page). Title and description
+        // come from precomputed keys in `metadata` that `useChat` writes back
+        // after each turn (`auto_title`, `preview`), plus the user rename
+        // (`title`) and pinned flag already stored there. Existing pre-fix
+        // threads get seeded once by `scripts/backfill-thread-previews.mjs`.
+        select: [
+          "thread_id",
+          "updated_at",
+          "state_updated_at",
+          "status",
+          "metadata",
+          "interrupts",
+        ],
       });
 
       return threads.map((thread): ThreadItem => {
-        let title = "Untitled Thread";
-        let description = "";
+        const md = (thread.metadata ?? {}) as Record<string, unknown>;
+        // A user rename (stored under `title`) always wins over the derived
+        // auto-title so the sidebar reflects what the user typed.
+        const customTitle = typeof md.title === "string" ? md.title.trim() : "";
+        const autoTitle =
+          typeof md.auto_title === "string" ? md.auto_title.trim() : "";
+        const preview = typeof md.preview === "string" ? md.preview.trim() : "";
 
-        try {
-          if (thread.values && typeof thread.values === "object") {
-            const values = thread.values as any;
-            const messages: any[] = Array.isArray(values.messages)
-              ? values.messages
-              : [];
-            // Extract readable text from a string OR an array of content blocks
-            // (the latter is common for multi-part / attachment messages).
-            const textOf = (content: any): string => {
-              if (typeof content === "string") return content;
-              if (Array.isArray(content))
-                return content
-                  .map((p: any) => (typeof p?.text === "string" ? p.text : ""))
-                  .join("");
-              return "";
-            };
-            const firstHumanMessage = messages.find(
-              (m: any) => m.type === "human"
-            );
-            const humanText = textOf(firstHumanMessage?.content).trim();
-            if (humanText) {
-              title =
-                humanText.slice(0, 50) + (humanText.length > 50 ? "…" : "");
-            }
-            // Preview = the first AI message that actually has text. Agentic
-            // threads often open with tool-call-only AI messages (empty
-            // content), so picking the literal first AI message would leave the
-            // row blank (looking like an "empty" thread). Also join all text
-            // parts rather than just content[0].
-            for (const m of messages) {
-              if (m?.type !== "ai") continue;
-              const t = textOf(m.content).trim();
-              if (t) {
-                description = t.slice(0, 100);
-                break;
-              }
-            }
-            // If the first human message yielded no text (odd/attachment-only
-            // shape), fall back to the AI preview so the row isn't an opaque
-            // "Untitled Thread".
-            if (title === "Untitled Thread" && description) {
-              title =
-                description.slice(0, 50) + (description.length > 50 ? "…" : "");
-            }
-          }
-        } catch {
-          // Fallback to thread ID
-          title = `Thread ${thread.thread_id.slice(0, 8)}`;
-        }
+        // Title falls back to the first-human autoTitle, then to the AI preview
+        // (rare edge case: attachment-only human message with no text), then to
+        // a bare thread-id label so nothing renders as "Untitled Thread".
+        let title = customTitle || autoTitle;
+        if (!title && preview) title = preview;
+        if (!title) title = `Thread ${thread.thread_id.slice(0, 8)}`;
+        if (title.length > 50) title = title.slice(0, 50) + "…";
 
-        // A user-set custom title (stored in metadata via rename) always wins.
-        const customTitle = (
-          thread.metadata as Record<string, unknown> | undefined
-        )?.title;
-        if (typeof customTitle === "string" && customTitle.trim()) {
-          title = customTitle.trim();
-        }
+        const description =
+          preview.length > 100 ? preview.slice(0, 100) : preview;
 
         // Pinned state is stored in thread metadata (like the custom title),
         // so it persists across reloads/devices via the backend store.
-        const pinned =
-          (thread.metadata as Record<string, unknown> | undefined)?.pinned ===
-          true;
+        const pinned = md.pinned === true;
 
         // Walk `thread.interrupts` (Record<task_id, Interrupt[]>) and flag any
         // value with `type: "ask_user"`. The auto-approver can't resolve those,
@@ -193,9 +168,15 @@ export function useThreads(props: {
           }
         }
 
+        // Prefer state_updated_at (real chat activity) but fall back to
+        // updated_at for very old threads that predate the field.
+        const activityTs =
+          (thread as { state_updated_at?: string | null }).state_updated_at ||
+          thread.updated_at;
+
         return {
           id: thread.thread_id,
-          updatedAt: new Date(thread.updated_at),
+          updatedAt: new Date(activityTs),
           status: thread.status,
           title,
           description,
@@ -284,6 +265,80 @@ export async function setThreadModelOverride(
   // un-set, which matches how langgraph treats absence-vs-null in the
   // configurable middleware (`getattr(cfg, "model", None)` accepts both).
   await updateThreadMetadata(client, id, { model_override: override });
+}
+
+/**
+ * Derive the two thread-sidebar labels — a "auto_title" from the first human
+ * message and a "preview" from the first AI message with actual text — off a
+ * message list. Same textOf shape as the original `useThreads` mapping (string
+ * OR content-block array). Returns `null` for either slot when there is
+ * nothing usable, so callers can leave the corresponding metadata key alone.
+ *
+ * Kept caps small on purpose: metadata rows are indexed and re-fetched on
+ * every sidebar load, so shorter is strictly better.
+ */
+export function deriveThreadMetadata(messages: unknown): {
+  autoTitle: string | null;
+  preview: string | null;
+} {
+  const textOf = (content: unknown): string => {
+    if (typeof content === "string") return content;
+    if (Array.isArray(content))
+      return content
+        .map((p) => {
+          if (p && typeof p === "object") {
+            const t = (p as { text?: unknown }).text;
+            return typeof t === "string" ? t : "";
+          }
+          return "";
+        })
+        .join("");
+    return "";
+  };
+  const list = Array.isArray(messages)
+    ? (messages as Array<{ type?: unknown; content?: unknown }>)
+    : [];
+  let autoTitle: string | null = null;
+  let preview: string | null = null;
+  for (const m of list) {
+    if (!m || typeof m !== "object") continue;
+    if (autoTitle === null && m.type === "human") {
+      const t = textOf(m.content).trim();
+      if (t) autoTitle = t.slice(0, 100);
+    }
+    if (preview === null && m.type === "ai") {
+      const t = textOf(m.content).trim();
+      if (t) preview = t.slice(0, 200);
+    }
+    if (autoTitle !== null && preview !== null) break;
+  }
+  return { autoTitle, preview };
+}
+
+/**
+ * Write derived sidebar labels into thread metadata, only for keys that would
+ * actually change. Read + merge preserves other metadata keys (custom title,
+ * pinned, model_override, graph_id / assistant_id filter keys). Silent no-op
+ * when no client is configured or nothing needs writing — this runs in a
+ * fire-and-forget effect and must never throw into the render tree.
+ */
+export async function persistThreadDerivedMetadata(
+  id: string,
+  next: { autoTitle: string | null; preview: string | null }
+): Promise<void> {
+  const client = makeThreadsClient();
+  if (!client) return;
+  const thread = await client.threads.get(id);
+  const current = (thread.metadata ?? {}) as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  if (next.autoTitle && current.auto_title !== next.autoTitle) {
+    patch.auto_title = next.autoTitle;
+  }
+  if (next.preview && current.preview !== next.preview) {
+    patch.preview = next.preview;
+  }
+  if (Object.keys(patch).length === 0) return;
+  await client.threads.update(id, { metadata: { ...current, ...patch } });
 }
 
 // Strip characters that are unsafe in filenames on Windows/macOS/Linux, then
