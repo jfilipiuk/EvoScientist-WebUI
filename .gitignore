@@ -51,3 +51,5 @@ CLAUDE.md
 AGENTS.md
 /.claude/
 /.codex-qa/
+
+.langgraph_api/

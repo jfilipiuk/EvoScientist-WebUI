@@ -37,6 +37,10 @@ import {
 } from "@/app/components/ActionGroup";
 import { CompactionSummary } from "@/app/components/CompactionSummary";
 import { ResearchDashboard } from "@/app/components/ResearchDashboard";
+import {
+  DynamicWorkflowPanel,
+  DynamicWorkflowTrigger,
+} from "@/app/components/DynamicWorkflowPanel";
 import { isSummarizationMessage } from "@/lib/summarization";
 import { useCollapseAgentActions } from "@/lib/uiSettings";
 import {
@@ -266,7 +270,9 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
     onOpenThread,
     workspaceOpen,
   }) => {
-    const [metaOpen, setMetaOpen] = useState<"tasks" | "files" | null>(null);
+    const [metaOpen, setMetaOpen] = useState<
+      "tasks" | "files" | "workflow" | null
+    >(null);
     const tasksContainerRef = useRef<HTMLDivElement | null>(null);
     const textareaRef = useRef<HTMLTextAreaElement | null>(null);
     const uploadInputRef = useRef<HTMLInputElement | null>(null);
@@ -404,6 +410,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       stopStream,
       resumeInterrupt,
       subAgentActivity,
+      dynamicWorkflows,
       asyncTasks,
       summarizationEvent,
       modelOverride,
@@ -1184,6 +1191,12 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       });
     }, [messages, actionRequests, interrupt, isLoading, stream]);
 
+    const hasWorkflows = useMemo(
+      () =>
+        Object.values(dynamicWorkflows).some((e) => e.dispatches.length > 0),
+      [dynamicWorkflows]
+    );
+
     // UI preference: auto-collapse completed agent-action groups. The user can
     // turn this off in ConfigDialog; default is on.
     const { value: collapseAgentActions } = useCollapseAgentActions();
@@ -1806,6 +1819,15 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
               <div className="flex max-h-60 flex-col overflow-y-auto border-b border-border bg-sidebar empty:hidden sm:max-h-72">
                 {!metaOpen && (
                   <>
+                    <DynamicWorkflowTrigger
+                      workflows={dynamicWorkflows}
+                      expanded={false}
+                      onClick={() =>
+                        setMetaOpen((prev) =>
+                          prev === "workflow" ? null : "workflow"
+                        )
+                      }
+                    />
                     {(() => {
                       const activeTask = todos.find(
                         (t) => t.status === "in_progress"
@@ -1956,6 +1978,20 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                           </span>
                         </button>
                       )}
+                      {hasWorkflows && (
+                        <button
+                          type="button"
+                          className="py-2.5 pr-4 first:pl-3 aria-expanded:font-semibold sm:first:pl-4"
+                          onClick={() =>
+                            setMetaOpen((prev) =>
+                              prev === "workflow" ? null : "workflow"
+                            )
+                          }
+                          aria-expanded={metaOpen === "workflow"}
+                        >
+                          Workflow
+                        </button>
+                      )}
                       <button
                         aria-label="Close"
                         className="flex-1"
@@ -2008,6 +2044,10 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                             }
                           />
                         </div>
+                      )}
+
+                      {metaOpen === "workflow" && (
+                        <DynamicWorkflowPanel workflows={dynamicWorkflows} />
                       )}
                     </div>
                   </>

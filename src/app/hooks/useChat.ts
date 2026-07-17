@@ -19,6 +19,14 @@ import {
   type SubAgentStep,
 } from "@/lib/subAgentActivity";
 import { parseSummarizationEvent } from "@/lib/summarization";
+import {
+  applySubagentEvent,
+  finalizeRunning,
+  mergeWorkflowMaps,
+  parseSubagentEvent,
+  type WorkflowMap,
+} from "@/lib/dynamicWorkflow";
+import { loadThreadWorkflows, saveThreadWorkflows } from "@/lib/workflowStore";
 import { toast } from "sonner";
 import {
   MODEL_OVERRIDE_METADATA_KEY,
@@ -195,6 +203,9 @@ export function useChat({
     Record<string, SubAgentStep[]>
   >({});
 
+  const [dynamicWorkflows, setDynamicWorkflows] = useState<WorkflowMap>({});
+  const workflowThreadIdRef = useRef(threadId);
+
   const stream = useStream<StateType>({
     assistantId: activeAssistant?.assistant_id || "",
     client: client ?? undefined,
@@ -240,6 +251,14 @@ export function useChat({
         [key]: [...(prev[key] ?? []), ...steps],
       }));
     },
+    onCustomEvent: (data, options) => {
+      if (options?.namespace && options.namespace.length > 0) return;
+      const event = parseSubagentEvent(data);
+      if (!event) return;
+      setDynamicWorkflows((prev) =>
+        applySubagentEvent(prev, event, Date.now())
+      );
+    },
     thread,
   });
 
@@ -253,6 +272,54 @@ export function useChat({
   // inside stable callbacks, so downstream callback identity stays constant.
   const streamRef = useRef(stream);
   streamRef.current = stream;
+
+  useEffect(() => {
+    const previousThreadId = workflowThreadIdRef.current;
+    workflowThreadIdRef.current = threadId;
+    if (!threadId) {
+      setDynamicWorkflows({});
+      return;
+    }
+    const stored = loadThreadWorkflows(threadId);
+    setDynamicWorkflows((prev) =>
+      previousThreadId !== null && previousThreadId !== threadId
+        ? stored
+        : mergeWorkflowMaps(stored, prev)
+    );
+  }, [threadId]);
+
+  const prevWorkflowLoadingRef = useRef(stream.isLoading);
+  useEffect(() => {
+    const was = prevWorkflowLoadingRef.current;
+    prevWorkflowLoadingRef.current = stream.isLoading;
+    if (was && !stream.isLoading) {
+      setDynamicWorkflows((prev) => finalizeRunning(prev, Date.now()));
+    }
+  }, [stream.isLoading]);
+
+  useEffect(() => {
+    if (!threadId || Object.keys(dynamicWorkflows).length === 0) return;
+    const timer = setTimeout(() => {
+      saveThreadWorkflows(threadId, dynamicWorkflows);
+    }, 1000);
+    return () => clearTimeout(timer);
+  }, [threadId, dynamicWorkflows]);
+
+  const workflowsFlushRef = useRef<{
+    threadId: string | null;
+    map: WorkflowMap;
+  }>({
+    threadId: null,
+    map: {},
+  });
+  workflowsFlushRef.current = { threadId, map: dynamicWorkflows };
+  useEffect(
+    () => () => {
+      const { threadId: tid, map } = workflowsFlushRef.current;
+      if (tid && Object.keys(map).length > 0) saveThreadWorkflows(tid, map);
+    },
+    []
+  );
 
   // --- Resilient pending-state fallback ------------------------------------
   // The live SSE stream can end (isLoading flips false) BEFORE the run actually
@@ -645,6 +712,7 @@ export function useChat({
     stopStream,
     resumeInterrupt,
     subAgentActivity,
+    dynamicWorkflows,
     modelOverride,
     setModelOverride,
   };
