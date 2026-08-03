@@ -78,14 +78,11 @@ import {
   asyncTaskReportKey,
   asyncUpdateMatchesTask,
   asyncUpdateMessageKey,
-  countRunning,
   formatAsyncUpdateMessage,
   isTerminalStatus,
-  type MainChatReporter,
   normalizeAsyncStatus,
 } from "@/lib/asyncAgents";
 import { useAsyncAgents } from "@/app/hooks/useAsyncAgents";
-import { useAutoNotify } from "@/app/hooks/useAutoNotify";
 import type { SubAgentStep } from "@/lib/subAgentActivity";
 import {
   loadThreadSubAgentSteps,
@@ -134,8 +131,6 @@ type DashboardNavTarget =
 
 interface ChatInterfaceProps {
   assistant: Assistant | null;
-  // Open the right inspector on its Agents tab (composer "agents running" pulse).
-  onShowAgents?: () => void;
   // Open the Experts marketplace as a full-panel view. Composer's active-team
   // chip routes here; label click on the chip is a "manage summoned expert"
   // affordance.
@@ -146,10 +141,6 @@ interface ChatInterfaceProps {
   onOpenThread?: (id: string) => void;
   // Whether the workspace inspector is currently visible.
   workspaceOpen?: boolean;
-  // Register a "submit a message on THIS (main) thread" function up to page so
-  // the Agents board can loop an async result back to the main agent. Returns
-  // false if the main chat is mid-run (can't take a turn). Cleared on unmount.
-  onNotifyReady?: (notify: MainChatReporter | null) => void;
 }
 
 const SUGGESTED_PROMPTS = [
@@ -285,9 +276,7 @@ const getStatusIcon = (status: TodoItem["status"], className?: string) => {
 export const ChatInterface = React.memo<ChatInterfaceProps>(
   ({
     assistant,
-    onShowAgents,
     onShowExperts,
-    onNotifyReady,
     onNavigate,
     onOpenThread,
     workspaceOpen,
@@ -472,10 +461,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
     const { tasks: liveAgentTasks } = useAsyncAgents(threadId, {
       enabled: hasAsyncTasks,
     });
-    const runningAgents = useMemo(
-      () => countRunning(liveAgentTasks),
-      [liveAgentTasks]
-    );
 
     const taskToolCallIds = useMemo(() => {
       const ids = new Set<string>();
@@ -584,12 +569,10 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       : false;
 
     // Auto-report: when on for this thread, a sub-agent that FINISHES while we're
-    // watching is looped back to the main agent automatically (same signal as the
-    // manual "Notify main chat" button — rendered as a system pill). We baseline
-    // tasks already terminal at mount / when the toggle is switched on so we never
-    // replay old completions, and only inject while the main chat is idle (one at
-    // a time; isLoading gates the rest until the agent finishes the turn).
-    const [autoNotify] = useAutoNotify(threadId);
+    // watching is looped back to the main agent automatically. We baseline tasks
+    // already terminal at mount so we never replay old completions, and only
+    // inject while the main chat is idle (one at a time; isLoading gates the
+    // rest until the agent finishes the turn).
     // Latch covering the gap between submitting an auto-report and `isLoading`
     // flipping true — without it a poll in that window could fire a SECOND report
     // and collide on the main thread. Cleared once the run is confirmed running.
@@ -608,7 +591,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
 
     useEffect(() => {
       if (!liveAgentTasks || liveAgentTasks.length === 0) return;
-      if (!threadId || !autoNotify) return;
+      if (!threadId) return;
       // One-time migration/baseline: existing terminal tasks predate the setting
       // and must not replay when this feature first appears or is restored.
       if (!isThreadAutoNotifyInitialized(threadId)) {
@@ -657,7 +640,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       }
     }, [
       liveAgentTasks,
-      autoNotify,
       isLoading,
       input,
       messages,
@@ -673,47 +655,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
     useEffect(() => {
       if (isLoading) void scrollToBottom();
     }, [isLoading, scrollToBottom]);
-
-    // Register a "notify the main agent" hook up to page (Agents board → "Notify
-    // main chat" loops an async result back here). A ref keeps the latest
-    // sendMessage/isLoading so the once-registered closure always reads current
-    // values. Returns false if a run is in flight (the agent can't take a turn).
-    const notifyStateRef = useRef({
-      sendMessage,
-      isLoading,
-      messages,
-      threadId,
-    });
-    notifyStateRef.current = { sendMessage, isLoading, messages, threadId };
-    const onNotifyReadyRef = useRef(onNotifyReady);
-    onNotifyReadyRef.current = onNotifyReady;
-    useEffect(() => {
-      const notify: MainChatReporter = (task, expectedThreadId) => {
-        const current = notifyStateRef.current;
-        if (current.threadId !== expectedThreadId) return "wrong-thread";
-        if (current.isLoading) return "busy";
-        if (
-          current.messages.some(
-            (message) =>
-              message.type === "human" &&
-              asyncUpdateMatchesTask(
-                extractStringFromMessageContent(message),
-                task
-              )
-          )
-        ) {
-          return "duplicate";
-        }
-        markThreadAutoNotifyReported(
-          expectedThreadId,
-          asyncTaskReportKey(task)
-        );
-        current.sendMessage(formatAsyncUpdateMessage(task));
-        return "sent";
-      };
-      onNotifyReadyRef.current?.(notify);
-      return () => onNotifyReadyRef.current?.(null);
-    }, []);
 
     // What model will the next turn use? The pill is forward-looking — it
     // updates the moment the user changes (or clears) the override, instead
@@ -2290,7 +2231,7 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                 </button>
               </div>
             )}
-            {(currentModel || runningAgents > 0) && (
+            {currentModel && (
               <div className="flex items-center gap-1.5 border-t border-border px-3 py-1.5 text-xs text-muted-foreground">
                 {currentModel && (
                   <button
@@ -2310,25 +2251,6 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
                     {currentModel.provider && (
                       <span>· {currentModel.provider}</span>
                     )}
-                  </button>
-                )}
-                {runningAgents > 0 && (
-                  <button
-                    type="button"
-                    onClick={onShowAgents}
-                    title={`${runningAgents} background agent${
-                      runningAgents === 1 ? "" : "s"
-                    } running — click to view`}
-                    aria-label={`${runningAgents} background agent${
-                      runningAgents === 1 ? "" : "s"
-                    } running — view`}
-                    className="ml-auto flex shrink-0 items-center gap-1.5 rounded px-1.5 py-0.5 font-medium text-[var(--brand)] transition-colors hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <span
-                      className="size-2 animate-pulse rounded-full bg-[var(--color-warning)]"
-                      aria-hidden="true"
-                    />
-                    {runningAgents} agent{runningAgents === 1 ? "" : "s"}
                   </button>
                 )}
               </div>
