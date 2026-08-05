@@ -45,7 +45,13 @@ export function ExpertDetailDialog({
         if (!next) onClose();
       }}
     >
-      <DialogContent className="max-w-lg gap-0 p-0">
+      <DialogContent
+        className="max-w-lg gap-0 p-0"
+        // Teams without a byline render no DialogDescription; drop the
+        // dangling aria-describedby so Radix doesn't warn. When a byline is
+        // present we leave the prop off entirely to keep Radix's association.
+        {...(team?.byline ? {} : { "aria-describedby": undefined })}
+      >
         <DialogHeader className="border-b border-border p-5">
           <div className="flex items-start gap-4">
             <span
