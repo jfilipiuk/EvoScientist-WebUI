@@ -22,3 +22,14 @@ export const fixtureAssistantWithConfig: Assistant = {
   ...fixtureAssistant,
   config: { configurable: { some_seed: "abc" } },
 } as unknown as Assistant;
+
+/** Assistant whose base config already carries an `active_teams` selection.
+ *  Lets tests prove `buildRunConfig` strips this inherited value so a dismissed
+ *  per-thread selection can't leak back onto the run from assistant-level
+ *  config. */
+export const fixtureAssistantWithSeededTeams: Assistant = {
+  ...fixtureAssistant,
+  config: {
+    configurable: { some_seed: "abc", active_teams: ["assistant-default"] },
+  },
+} as unknown as Assistant;

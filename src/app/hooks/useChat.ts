@@ -511,6 +511,11 @@ export function useChat({
       })();
       return;
     }
+    // Clear immediately so the previous thread's teams don't linger in state
+    // during the metadata round-trip below. A message sent in that window
+    // would otherwise carry the old thread's `active_teams`. The fetch replaces
+    // this with the new thread's persisted list once it resolves.
+    setActiveTeamsState([]);
     let cancelled = false;
     void (async () => {
       try {
@@ -724,6 +729,11 @@ export function useChat({
         configurable.model_provider = modelOverride.model_provider;
       }
     }
+    // Drop any assistant-level `active_teams` inherited from baseConfigurable
+    // first: after the user dismisses all teams, `activeTeams` is empty and the
+    // block below won't run, so without this delete a stale assistant-level
+    // selection would leak back onto the run.
+    delete configurable.active_teams;
     // Only include the key when a team is summoned. Sending an empty array
     // would also work (backend middleware treats [] as no-op) but leaving
     // the key absent keeps the run config minimal for chats without a
