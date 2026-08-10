@@ -81,13 +81,16 @@ export function useSubThreadState(
       if (reqId !== reqRef.current || !mountedRef.current) return;
       setState({
         values: {
+          // Spread first so the normalized `messages`/`todos` below win.
+          // Placing it last would let a non-array (or missing) raw value
+          // overwrite the guarded arrays and break callers that iterate them.
+          ...(next.values ?? {}),
           messages: Array.isArray(next.values?.messages)
             ? (next.values?.messages as unknown[])
             : [],
           todos: Array.isArray(next.values?.todos)
             ? (next.values?.todos as TodoItem[])
             : [],
-          ...(next.values ?? {}),
         },
       });
       setError(null);
@@ -120,7 +123,11 @@ export function useSubThreadState(
 
   useEffect(() => {
     mountedRef.current = true;
-    if (!subThreadId) {
+    // Once a sub-thread is gone (404), the state is permanent — stop polling so
+    // we don't hammer getState with a 404 every interval for as long as the
+    // focus view stays open. `refresh` stays callable for a manual retry, and a
+    // subThreadId change resets `expired` (above) and restarts the interval.
+    if (!subThreadId || expired) {
       return () => {
         mountedRef.current = false;
       };
@@ -133,7 +140,7 @@ export function useSubThreadState(
       mountedRef.current = false;
       clearInterval(timer);
     };
-  }, [refresh, subThreadId, intervalMs]);
+  }, [refresh, subThreadId, intervalMs, expired]);
 
   return { state, loading, error, refresh, expired };
 }
