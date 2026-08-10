@@ -731,6 +731,10 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
     useEffect(() => {
       if (isLoading || hasPendingInterrupt || autoFireInFlightRef.current)
         return;
+      // Hold the queue while a persona sub-thread is focused. Direct submission
+      // is already blocked in this mode; draining here would start a turn on the
+      // main thread behind the PersonaFocusView the user is watching.
+      if (focusedAgentThreadId !== null) return;
       if (queuedMessages.length === 0) return;
       const [head, ...rest] = queuedMessages;
       // Effects from the previous render still run once after a route/thread
@@ -739,7 +743,14 @@ export const ChatInterface = React.memo<ChatInterfaceProps>(
       autoFireInFlightRef.current = true;
       setQueuedMessages(rest);
       sendMessage(formatMessageWithFiles(head.text, head.files));
-    }, [isLoading, hasPendingInterrupt, queuedMessages, sendMessage, threadId]);
+    }, [
+      isLoading,
+      hasPendingInterrupt,
+      focusedAgentThreadId,
+      queuedMessages,
+      sendMessage,
+      threadId,
+    ]);
 
     // Clear the queue when switching to a *different* conversation, but NOT on the
     // null→real-id transition that happens when the first message of a brand-new
