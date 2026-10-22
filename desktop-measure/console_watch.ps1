@@ -1,8 +1,13 @@
 # Measurement 1 watcher. Started by main.cjs (mode consoles) as its own child,
 # with pipes and windowsHide, so it has no console window of its own.
 # Until -StopFile exists, every 150 ms it:
-#   - lists every descendant of -RootPid (except itself) and, for each one it
-#     has not checked in the last second, attaches to its console:
+#   - lists the descendants of -RootPid (except itself): the processes reached
+#     through parent ids from -RootPid or from any process it has already
+#     classed as a descendant. The second seed keeps a subtree whose parent
+#     has exited, such as EvoSci update's helper after EvoSci hands over and
+#     exits. A process that lives less than one pass can be missed;
+#   - for each descendant it has not checked in the last second, attaches to
+#     its console:
 #     AttachConsole(pid) -> GetConsoleWindow() -> IsWindowVisible() -> FreeConsole();
 #   - lists visible top-level console windows (classic console, Windows
 #     Terminal, pseudo console) that were not there at the start.
@@ -96,6 +101,7 @@ Emit @{ kind = 'start'; root = $RootPid; self = $self; baseline_visible_console_
 [Console]::Out.WriteLine('ready')
 [Console]::Out.Flush()
 
+$known = @{}       # pid -> $true for every process ever classed as a descendant
 $lastProbe = @{}   # pid -> time of last probe
 $lastState = @{}   # pid -> last probe result
 $names = @{}       # pid -> exe
@@ -107,10 +113,17 @@ while (-not (Test-Path -LiteralPath $StopFile)) {
         if (-not $children.ContainsKey($p.Ppid)) { $children[$p.Ppid] = New-Object System.Collections.Generic.List[object] }
         $children[$p.Ppid].Add($p)
     }
+    $byPid = @{}
+    foreach ($p in $procs) { $byPid[[string]$p.Pid] = $p }
     $queue = New-Object System.Collections.Generic.Queue[uint32]
     $queue.Enqueue([uint32]$RootPid)
     $desc = New-Object System.Collections.Generic.List[object]
     $visited = @{}
+    $listed = @{}
+    # Known descendants still alive are descendants even when their parent is gone.
+    foreach ($k in @($known.Keys)) {
+        if ($byPid.ContainsKey($k)) { $desc.Add($byPid[$k]); $listed[$k] = $true; $queue.Enqueue([uint32]$k) }
+    }
     while ($queue.Count -gt 0) {
         $cur = $queue.Dequeue()
         if ($visited.ContainsKey($cur)) { continue }
@@ -118,7 +131,9 @@ while (-not (Test-Path -LiteralPath $StopFile)) {
         if ($children.ContainsKey($cur)) {
             foreach ($c in $children[$cur]) {
                 if ($c.Pid -eq $self -or $c.Pid -eq $cur) { continue }
-                $desc.Add($c); $queue.Enqueue($c.Pid)
+                if (-not $listed.ContainsKey([string]$c.Pid)) { $desc.Add($c); $listed[[string]$c.Pid] = $true }
+                $queue.Enqueue($c.Pid)
+                $known[[string]$c.Pid] = $true
             }
         }
     }

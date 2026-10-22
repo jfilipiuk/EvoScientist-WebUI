@@ -2,8 +2,13 @@ name: W03a Windows measurements
 
 # Measurements 1, 3, 4 and 7 from issue #57 ("Measure before W03a"), on
 # hosted runners. Runs on a push to a measure/** branch; not part of CI.
-# The core comes from a wheel built from EvoScientist main and installed by
-# its scripts/install.ps1, as the core's installer smoke workflow does.
+# The core: scripts/install.ps1 installs the newest release (so uv's receipt
+# names the index), then the wheel built from EvoScientist main goes into the
+# tool environment with `uv pip install --reinstall-package`, as Test-Update in
+# the core's .github/scripts/install_smoke_check.ps1 does. Installing the
+# wheel through install.ps1 instead would record a `path` source in the
+# receipt, and every `EvoSci update` would then refuse with manual_update.
+# The results are records in the artifacts; the jobs do not fail on them.
 on:
   push:
     branches: ["measure/**"]
@@ -25,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           repository: EvoScientist/EvoScientist
           ref: ${{ env.CORE_REF }}
@@ -59,14 +64,23 @@ jobs:
       - name: Install Electron for the probe app
         working-directory: desktop-measure
         run: npm install --no-audit --no-fund --no-package-lock
-      - name: Install the core (release, then the wheel from main), no setup
+      - name: Install the core (release by the script, then main's wheel over it), no setup
         shell: powershell
         run: |
-          $installer = "$env:RUNNER_TEMP\dist\install.ps1"
-          & ([scriptblock]::Create((Get-Content -Raw $installer))) -NoSetup -NoModifyPath
-          $env:EVOSCI_INSTALL_SOURCE = (Get-ChildItem "$env:RUNNER_TEMP\dist\*.whl").FullName
-          $env:EVOSCI_INSTALL_CONSTRAINTS = "$env:RUNNER_TEMP\dist\constraints.txt"
-          & ([scriptblock]::Create((Get-Content -Raw $installer))) -NoSetup -NoModifyPath
+          & ([scriptblock]::Create((Get-Content -Raw "$env:RUNNER_TEMP\dist\install.ps1"))) -NoSetup -NoModifyPath
+          $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
+          $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
+          $python = Join-Path ((& $uv tool dir).Trim()) 'evoscientist\Scripts\python.exe'
+          $evosci = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
+          # uv splits a -c path at spaces (astral-sh/uv#12639): by name, from its folder.
+          Push-Location "$env:RUNNER_TEMP\dist"
+          & $uv pip install -q --python $python --reinstall-package evoscientist -c constraints.txt (Get-ChildItem *.whl).FullName
+          if ($LASTEXITCODE -ne 0) { throw "uv pip install of main's wheel failed" }
+          Pop-Location
+          # main's code is in place: only it has `deploy --json` (C13).
+          $help = (& $evosci deploy --help) -join "`n"
+          if ($help -notmatch '--json') { throw "EvoSci deploy has no --json: main's wheel is not in place" }
+          "core sha: $(Get-Content "$env:RUNNER_TEMP\dist\core-sha.txt")"
       - name: Measure
         shell: powershell
         run: |
@@ -111,8 +125,9 @@ jobs:
           name: measure-3-orphan
           path: ${{ runner.temp }}/measure-out/
 
-  # Measurement 4: EvoSci update --json with a cold uv cache, from a parent
-  # that reads only stdout, and (control) one that reads both streams.
+  # Measurement 4, from a parent that reads only stdout and (control) one
+  # that reads both streams: a stand-in that writes 1 MiB to stderr, then
+  # EvoSci update --json with a cold uv cache.
   backpressure:
     needs: core-wheel
     runs-on: windows-latest
@@ -130,14 +145,23 @@ jobs:
       - name: Install Electron for the probe app
         working-directory: desktop-measure
         run: npm install --no-audit --no-fund --no-package-lock
-      - name: Install the core (release, then the wheel from main)
+      - name: Install the core (release by the script, then main's wheel over it), no setup
         shell: powershell
         run: |
-          $installer = "$env:RUNNER_TEMP\dist\install.ps1"
-          & ([scriptblock]::Create((Get-Content -Raw $installer))) -NoSetup -NoModifyPath
-          $env:EVOSCI_INSTALL_SOURCE = (Get-ChildItem "$env:RUNNER_TEMP\dist\*.whl").FullName
-          $env:EVOSCI_INSTALL_CONSTRAINTS = "$env:RUNNER_TEMP\dist\constraints.txt"
-          & ([scriptblock]::Create((Get-Content -Raw $installer)))
+          & ([scriptblock]::Create((Get-Content -Raw "$env:RUNNER_TEMP\dist\install.ps1"))) -NoSetup -NoModifyPath
+          $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
+          $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
+          $python = Join-Path ((& $uv tool dir).Trim()) 'evoscientist\Scripts\python.exe'
+          $evosci = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
+          # uv splits a -c path at spaces (astral-sh/uv#12639): by name, from its folder.
+          Push-Location "$env:RUNNER_TEMP\dist"
+          & $uv pip install -q --python $python --reinstall-package evoscientist -c constraints.txt (Get-ChildItem *.whl).FullName
+          if ($LASTEXITCODE -ne 0) { throw "uv pip install of main's wheel failed" }
+          Pop-Location
+          # main's code is in place: only it has `deploy --json` (C13).
+          $help = (& $evosci deploy --help) -join "`n"
+          if ($help -notmatch '--json') { throw "EvoSci deploy has no --json: main's wheel is not in place" }
+          "core sha: $(Get-Content "$env:RUNNER_TEMP\dist\core-sha.txt")"
       - name: Measure
         shell: powershell
         env:
@@ -147,15 +171,26 @@ jobs:
           $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
           $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
           $env:EVOSCI = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
-          # A cold uv cache, so the reinstall prints all of uv's download output.
-          & $uv cache clean
           $env:MEASURE_OUT = "$env:RUNNER_TEMP\measure-out"
           $env:WORKDIR = "$env:RUNNER_TEMP\workspace"
+          New-Item -ItemType Directory -Force -Path $env:MEASURE_OUT, $env:WORKDIR | Out-Null
+          # The same restricted environment as consoles, from setup on, so the
+          # setup that the update runs afterwards finds what this one installed.
           $env:Path = "$env:SystemRoot\System32;$env:SystemRoot;$env:SystemRoot\System32\WindowsPowerShell\v1.0\;$env:SystemRoot\System32\Wbem"
           Get-ChildItem Env: | Where-Object Name -match '^(UV_|PIP_|PYTHONPATH$)' | ForEach-Object { Remove-Item "Env:\$($_.Name)" }
-          $p = Start-Process -FilePath $electron -ArgumentList "`"$env:GITHUB_WORKSPACE\desktop-measure`"", '--mode=backpressure' -PassThru -Wait
-          Write-Host "probe exit code: $($p.ExitCode)"
-          Get-Content "$env:MEASURE_OUT\backpressure.result.json"
+          # Start-Process redirects stderr without turning its lines into
+          # PowerShell errors, which the runner's $ErrorActionPreference = 'Stop' would throw on.
+          $s = Start-Process -FilePath $env:EVOSCI -ArgumentList 'setup', '--json' -WorkingDirectory $env:WORKDIR -NoNewWindow -Wait -PassThru `
+            -RedirectStandardOutput "$env:MEASURE_OUT\setup-before.jsonl" -RedirectStandardError "$env:MEASURE_OUT\setup-before.stderr.log"
+          Write-Host "setup before the measurement: exit $($s.ExitCode)"
+          # A cold uv cache, so the reinstall prints all of uv's download output.
+          & $uv cache clean
+          # The pipe alone first (a stand-in writing 1 MiB to stderr), then EvoSci update.
+          foreach ($m in 'pipefill', 'backpressure') {
+            $p = Start-Process -FilePath $electron -ArgumentList "`"$env:GITHUB_WORKSPACE\desktop-measure`"", "--mode=$m" -PassThru -Wait
+            Write-Host "$m probe exit code: $($p.ExitCode)"
+            Get-Content "$env:MEASURE_OUT\$m.result.json"
+          }
       - if: always()
         uses: actions/upload-artifact@v4
         with:
