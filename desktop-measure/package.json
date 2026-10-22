@@ -1,0 +1,10 @@
+{
+  "name": "evoscientist-desktop-measure",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Windows measurements for the desktop shell (issue #57, W03a). Not shipped.",
+  "main": "main.cjs",
+  "devDependencies": {
+    "electron": "44.9.3"
+  }
+}
