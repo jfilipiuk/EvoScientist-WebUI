@@ -70,8 +70,8 @@ jobs:
           & ([scriptblock]::Create((Get-Content -Raw "$env:RUNNER_TEMP\dist\install.ps1"))) -NoSetup -NoModifyPath
           $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
           $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
-          $python = Join-Path ((& $uv tool dir).Trim()) 'evoscientist\Scripts\python.exe'
-          $evosci = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
+          $python = Join-Path ((& $uv tool dir | Select-Object -Last 1).Trim()) 'evoscientist\Scripts\python.exe'
+          $evosci = Join-Path ((& $uv tool dir --bin | Select-Object -Last 1).Trim()) 'EvoSci.exe'
           # uv splits a -c path at spaces (astral-sh/uv#12639): by name, from its folder.
           Push-Location "$env:RUNNER_TEMP\dist"
           & $uv pip install -q --python $python --reinstall-package evoscientist -c constraints.txt (Get-ChildItem *.whl).FullName
@@ -84,10 +84,11 @@ jobs:
       - name: Measure
         shell: powershell
         run: |
-          $electron = (& node -p "require('./desktop-measure/node_modules/electron')").Trim()
+          $electron = Join-Path $env:GITHUB_WORKSPACE 'desktop-measure\node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path -LiteralPath $electron)) { throw "No Electron at $electron" }
           $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
           $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
-          $env:EVOSCI = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
+          $env:EVOSCI = Join-Path ((& $uv tool dir --bin | Select-Object -Last 1).Trim()) 'EvoSci.exe'
           $env:MEASURE_OUT = "$env:RUNNER_TEMP\measure-out"
           $env:WORKDIR = "$env:RUNNER_TEMP\workspace"
           # Only system folders on PATH, so setup downloads Node, uv's Python and Git.
@@ -114,7 +115,8 @@ jobs:
       - name: Measure
         shell: powershell
         run: |
-          $electron = (& node -p "require('./desktop-measure/node_modules/electron')").Trim()
+          $electron = Join-Path $env:GITHUB_WORKSPACE 'desktop-measure\node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path -LiteralPath $electron)) { throw "No Electron at $electron" }
           $env:MEASURE_OUT = "$env:RUNNER_TEMP\measure-out"
           foreach ($variant in 'running', 'suspended') {
             & "$env:GITHUB_WORKSPACE\desktop-measure\orphan_check.ps1" -Variant $variant -Electron $electron
@@ -151,8 +153,8 @@ jobs:
           & ([scriptblock]::Create((Get-Content -Raw "$env:RUNNER_TEMP\dist\install.ps1"))) -NoSetup -NoModifyPath
           $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
           $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
-          $python = Join-Path ((& $uv tool dir).Trim()) 'evoscientist\Scripts\python.exe'
-          $evosci = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
+          $python = Join-Path ((& $uv tool dir | Select-Object -Last 1).Trim()) 'evoscientist\Scripts\python.exe'
+          $evosci = Join-Path ((& $uv tool dir --bin | Select-Object -Last 1).Trim()) 'EvoSci.exe'
           # uv splits a -c path at spaces (astral-sh/uv#12639): by name, from its folder.
           Push-Location "$env:RUNNER_TEMP\dist"
           & $uv pip install -q --python $python --reinstall-package evoscientist -c constraints.txt (Get-ChildItem *.whl).FullName
@@ -167,10 +169,11 @@ jobs:
         env:
           READ: ${{ matrix.read }}
         run: |
-          $electron = (& node -p "require('./desktop-measure/node_modules/electron')").Trim()
+          $electron = Join-Path $env:GITHUB_WORKSPACE 'desktop-measure\node_modules\electron\dist\electron.exe'
+          if (-not (Test-Path -LiteralPath $electron)) { throw "No Electron at $electron" }
           $dataDir = Join-Path $env:USERPROFILE '.evoscientist'
           $uv = (Get-Content -Raw -Encoding UTF8 (Join-Path $dataDir 'tools\uv.json') | ConvertFrom-Json).path
-          $env:EVOSCI = Join-Path ((& $uv tool dir --bin).Trim()) 'EvoSci.exe'
+          $env:EVOSCI = Join-Path ((& $uv tool dir --bin | Select-Object -Last 1).Trim()) 'EvoSci.exe'
           $env:MEASURE_OUT = "$env:RUNNER_TEMP\measure-out"
           $env:WORKDIR = "$env:RUNNER_TEMP\workspace"
           New-Item -ItemType Directory -Force -Path $env:MEASURE_OUT, $env:WORKDIR | Out-Null
