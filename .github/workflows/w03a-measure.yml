@@ -63,7 +63,11 @@ jobs:
           path: ${{ runner.temp }}/dist
       - name: Install Electron for the probe app
         working-directory: desktop-measure
-        run: npm install --no-audit --no-fund --no-package-lock
+        # Electron 44 has no postinstall: the binary comes from its
+        # install-electron bin (or lazily on the first require).
+        run: |
+          npm install --no-audit --no-fund --no-package-lock
+          npx --no install-electron
       - name: Install the core (release by the script, then main's wheel over it), no setup
         shell: powershell
         run: |
@@ -111,7 +115,11 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install Electron for the probe app
         working-directory: desktop-measure
-        run: npm install --no-audit --no-fund --no-package-lock
+        # Electron 44 has no postinstall: the binary comes from its
+        # install-electron bin (or lazily on the first require).
+        run: |
+          npm install --no-audit --no-fund --no-package-lock
+          npx --no install-electron
       - name: Measure
         shell: powershell
         run: |
@@ -146,7 +154,11 @@ jobs:
           path: ${{ runner.temp }}/dist
       - name: Install Electron for the probe app
         working-directory: desktop-measure
-        run: npm install --no-audit --no-fund --no-package-lock
+        # Electron 44 has no postinstall: the binary comes from its
+        # install-electron bin (or lazily on the first require).
+        run: |
+          npm install --no-audit --no-fund --no-package-lock
+          npx --no install-electron
       - name: Install the core (release by the script, then main's wheel over it), no setup
         shell: powershell
         run: |
