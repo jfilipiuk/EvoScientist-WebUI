@@ -1,0 +1,70 @@
+name: W03b Windows measurements
+
+# "Measure before W03b" from issue #57: the core's install.ps1, run the way
+# the desktop app will (script block from a file, three pipes, windowsHide)
+# from a Node parent, under a profile folder with a space and non-ASCII
+# characters. Runs on a push to a measure/** branch; not part of CI. The
+# results are records in the artifact; the job does not fail on them.
+on:
+  push:
+    branches: ["measure/**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Tag v0.3.8 is lightweight, so the script is fetched by commit and checked.
+  CORE_COMMIT: e2eef1487963f77abca3dbdae5d739eda73c6e71
+  INSTALL_PS1_SHA256: 9e770365088c3e64d63707771359f17e644c4c75d8a0dc8d54d4f421f5327ff2
+  CORE_VERSION: "0.3.8"
+
+jobs:
+  install-script:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "24"
+      - name: Download install.ps1 at the pinned commit and check its SHA-256
+        shell: pwsh
+        run: |
+          $dest = Join-Path $env:RUNNER_TEMP 'install.ps1'
+          Invoke-WebRequest -UseBasicParsing -Uri "https://raw.githubusercontent.com/EvoScientist/EvoScientist/$env:CORE_COMMIT/scripts/install.ps1" -OutFile $dest
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $dest).Hash.ToLower()
+          if ($actual -ne $env:INSTALL_PS1_SHA256) { throw "install.ps1 sha256 $actual, expected $env:INSTALL_PS1_SHA256" }
+          Write-Host "install.ps1 $actual"
+      - name: Machine facts
+        shell: pwsh
+        run: |
+          Get-ExecutionPolicy -List | Format-Table -AutoSize
+          [Globalization.CultureInfo]::CurrentCulture.TextInfo | Select-Object OEMCodePage, ANSICodePage | Format-List
+          node --version
+      - name: Run the probe (all cases)
+        working-directory: desktop-measure-w03b
+        run: node probe.mjs --script "${{ runner.temp }}\install.ps1" --out "${{ runner.temp }}\w03b-out" --version ${{ env.CORE_VERSION }}
+      - name: Summary table
+        if: always()
+        shell: pwsh
+        run: |
+          $s = Get-Content -Raw -Encoding UTF8 "$env:RUNNER_TEMP\w03b-out\summary.json" | ConvertFrom-Json
+          $s.results | ForEach-Object {
+            [pscustomobject]@{
+              case = $_.name; policy = $_.policy; utf8 = $_.utf8; code = $_.code; ms = $_.exitMs
+              out = $_.stdoutBytes; err = $_.stderrBytes
+              fffdOut = $_.stdoutHasReplacementChar; fffdErr = $_.stderrHasReplacementChar
+              clixml = ($_.clixml.stdout -or $_.clixml.stderr)
+              errorOn = if ($_.errorLines.stdout) { 'stdout' } elseif ($_.errorLines.stderr) { 'stderr' } else { '' }
+            }
+          } | Format-Table -AutoSize | Out-String -Width 300
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: w03b-measure
+          path: ${{ runner.temp }}/w03b-out/
