@@ -47,7 +47,10 @@ function homeEnv(home, { keepModulePath = false } = {}) {
   const env = { ...process.env };
   if (!keepModulePath) for (const k of Object.keys(env)) if (k.toUpperCase() === "PSMODULEPATH") delete env[k];
   delete env.EVOSCIENTIST_DATA_DIR;
-  for (const k of Object.keys(env)) if (k.startsWith("XDG_") || k.startsWith("UV_")) delete env[k];
+  // Only the variables that move uv's or the core's folders; proxy and TLS
+  // settings such as UV_NATIVE_TLS stay, as they would for the app.
+  const moves = /^(XDG_.*|UV_(TOOL_DIR|TOOL_BIN_DIR|CACHE_DIR|PYTHON_INSTALL_DIR|INSTALL_DIR|CONFIG_FILE))$/i;
+  for (const k of Object.keys(env)) if (moves.test(k)) delete env[k];
   Object.assign(env, {
     USERPROFILE: home,
     HOMEDRIVE: drive,
@@ -207,9 +210,11 @@ const CASES = {
   // Real installs: the default policy, Restricted (module loading), Bypass + prefix.
   "install-restricted": () => runCase("install-restricted", { home: homeFor("restricted"), policy: "Restricted" }),
   "install-default-noprefix": () => runCase("install-default-noprefix", { home: homeFor("default"), utf8: false }),
-  "install-bypass-utf8": () => runCase("install-bypass-utf8", { home: homeFor("ok"), policy: "Bypass" }),
+  "install-bypass-utf8": () => runCase("install-bypass-utf8", { home: homeFor("bypass"), policy: "Bypass" }),
+  // The command proposed for the app (D10): no policy flag, UTF-8 prefix.
+  "install-default-utf8": () => runCase("install-default-utf8", { home: homeFor("ok") }),
   // On the same home: a second run (repair path) and one while EvoScientist runs.
-  "reinstall-utf8": () => runCase("reinstall-utf8", { home: homeFor("ok"), policy: "Bypass" }),
+  "reinstall-utf8": () => runCase("reinstall-utf8", { home: homeFor("ok") }),
   "running-noprefix": async () => runningCase("running-noprefix", false),
   "running-utf8": async () => runningCase("running-utf8", true),
 };
@@ -217,7 +222,7 @@ const CASES = {
 async function runningCase(name, utf8) {
   const home = homeFor("ok");
   const py = startEnvPython(home);
-  if (!py) return { name, skipped: "no installed environment under the ok home (install-bypass-utf8 must run first)" };
+  if (!py) return { name, skipped: "no installed environment under the ok home (install-default-utf8 must run first)" };
   await new Promise((r) => setTimeout(r, 1500));
   try {
     return await runCase(name, { home, policy: "Bypass", utf8 });
