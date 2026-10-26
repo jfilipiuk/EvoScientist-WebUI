@@ -39,9 +39,13 @@ function installCommand({ utf8, scriptArgs }) {
   );
 }
 
-function homeEnv(home) {
+// PSModulePath is dropped by default, as the app would: a parent started from
+// pwsh 7 passes its module path on, and Windows PowerShell 5.1 then fails to
+// load its own modules (run 1). keepModulePath keeps it to show that.
+function homeEnv(home, { keepModulePath = false } = {}) {
   const drive = home.slice(0, 2);
   const env = { ...process.env };
+  if (!keepModulePath) for (const k of Object.keys(env)) if (k.toUpperCase() === "PSMODULEPATH") delete env[k];
   delete env.EVOSCIENTIST_DATA_DIR;
   for (const k of Object.keys(env)) if (k.startsWith("XDG_") || k.startsWith("UV_")) delete env[k];
   Object.assign(env, {
@@ -64,9 +68,9 @@ function homeFor(name) {
 }
 
 // Spawns powershell.exe the way the app will and records everything.
-function runCase(name, { home, policy, utf8 = true, scriptArgs, scriptPath = SCRIPT, extraEnv = {}, command }) {
+function runCase(name, { home, policy, utf8 = true, scriptArgs, scriptPath = SCRIPT, extraEnv = {}, command, keepModulePath = false }) {
   return new Promise((resolve) => {
-    const env = { ...homeEnv(home), EVOSCI_INSTALL_SCRIPT: scriptPath, ...extraEnv };
+    const env = { ...homeEnv(home, { keepModulePath }), EVOSCI_INSTALL_SCRIPT: scriptPath, ...extraEnv };
     const cmd = command ?? installCommand({ utf8, scriptArgs: scriptArgs ?? `-Version ${VERSION} -NoSetup -NoModifyPath` });
     const argv = ["-NoProfile", "-NonInteractive", ...(policy ? ["-ExecutionPolicy", policy] : []), "-Command", cmd];
     const started = Date.now();
@@ -109,7 +113,7 @@ function runCase(name, { home, policy, utf8 = true, scriptArgs, scriptPath = SCR
       const err = Buffer.concat(chunks.stderr);
       fs.writeFileSync(path.join(OUT, `${name}.stdout.bin`), out);
       fs.writeFileSync(path.join(OUT, `${name}.stderr.bin`), err);
-      resolve({ name, home, policy: policy ?? "(none)", utf8, argv, ...exit, closedMs: Date.now() - started, ...analyse(out, err, home) });
+      resolve({ name, home, policy: policy ?? "(none)", utf8, keepModulePath, argv, ...exit, closedMs: Date.now() - started, ...analyse(out, err, home) });
     }
   });
 }
@@ -144,7 +148,7 @@ const ENV_PROBE =
   "Write-Host ('OutputEncoding=' + $o.CodePage + ' ' + $o.WebName); Write-Host ('InputEncoding=' + $i.CodePage); " +
   "Write-Host ('OEMCP=' + [Text.Encoding]::GetEncoding([Globalization.CultureInfo]::CurrentCulture.TextInfo.OEMCodePage).CodePage); " +
   "Write-Host ('ANSICP=' + [Globalization.CultureInfo]::CurrentCulture.TextInfo.ANSICodePage); " +
-  "Write-Host ('PS=' + $PSVersionTable.PSVersion); Write-Host ('LanguageMode=' + $ExecutionContext.SessionState.LanguageMode); " +
+  "Write-Host ('PS=' + $PSVersionTable.PSVersion); Write-Host ('PSModulePath=' + $env:PSModulePath); Write-Host ('LanguageMode=' + $ExecutionContext.SessionState.LanguageMode); " +
   "Get-ExecutionPolicy -List | ForEach-Object { Write-Host ('Policy ' + $_.Scope + '=' + $_.ExecutionPolicy) }; " +
   "Write-Host 'Write-Host ąę Zoë'; Write-Output 'Write-Output ąę Zoë'; [Console]::Error.WriteLine('Console.Error ąę Zoë'); " +
   "Write-Error 'Write-Error ąę Zoë' -ErrorAction Continue; " +
@@ -177,6 +181,7 @@ function startEnvPython(home) {
 
 const CASES = {
   // Code pages, language mode, policy list, how each output path is encoded.
+  "env-inherited-modulepath": () => runCase("env-inherited-modulepath", { home: homeFor("env"), command: UTF8_PREFIX + ENV_PROBE, keepModulePath: true }),
   "env-default": () => runCase("env-default", { home: homeFor("env"), command: ENV_PROBE }),
   "env-restricted": () => runCase("env-restricted", { home: homeFor("env"), policy: "Restricted", command: ENV_PROBE }),
   "env-restricted-utf8": () => runCase("env-restricted-utf8", { home: homeFor("env"), policy: "Restricted", command: UTF8_PREFIX + ENV_PROBE }),
@@ -226,6 +231,7 @@ const summary = {
   node: process.version,
   electron: process.versions.electron ?? null,
   script: SCRIPT,
+  parentPSModulePath: process.env.PSModulePath ?? null,
   scriptSha256: (await import("node:crypto")).createHash("sha256").update(fs.readFileSync(SCRIPT)).digest("hex"),
   version: VERSION,
   base: BASE,
