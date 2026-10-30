@@ -5,15 +5,23 @@
 // restart says. In a plain browser nothing shows.
 
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import { Toaster, toast } from "sonner";
 import { DesktopUpdateNotice } from "@/app/components/DesktopUpdateNotice";
 import type { AppUpdateState } from "@/lib/desktop";
 
 function fakeApp(initial: AppUpdateState) {
   let send: (s: AppUpdateState) => void = () => {};
+  let current = initial;
   const appUpdate = {
-    state: vi.fn(async () => initial),
+    state: vi.fn(async () => current),
     onState: vi.fn((cb: (s: AppUpdateState) => void) => {
       send = cb;
       return () => {};
@@ -22,7 +30,14 @@ function fakeApp(initial: AppUpdateState) {
     restartToUpdate: vi.fn(async () => ({ ok: false, code: "busy" })),
   };
   window.evoscientistDesktop = { appUpdate };
-  return { appUpdate, send: (s: AppUpdateState) => act(() => send(s)) };
+  return {
+    appUpdate,
+    send: (s: AppUpdateState) =>
+      act(() => {
+        current = s;
+        send(s);
+      }),
+  };
 }
 
 function mount() {
@@ -38,9 +53,16 @@ afterEach(async () => {
   act(() => {
     toast.dismiss();
   });
-  // sonner removes a dismissed toast by id 200 ms later: let that happen
-  // now, not in the next test (same id) or after the environment is gone.
-  await act(() => new Promise((r) => setTimeout(r, 300)));
+  // sonner removes a dismissed toast by id after an animation frame and
+  // 200 ms; unmounting the notice dismisses its id in another frame. Let all
+  // of that land now, while no Toaster listens, not in the next test (same
+  // id) or after the environment is torn down.
+  await waitFor(
+    () => expect(document.querySelector("[data-sonner-toast]")).toBeNull(),
+    { timeout: 5_000 }
+  );
+  cleanup();
+  await act(() => new Promise<void>((r) => requestAnimationFrame(() => r())));
   delete window.evoscientistDesktop;
 });
 
@@ -94,6 +116,29 @@ describe("DesktopUpdateNotice", () => {
     expect(
       screen.getByRole("button", { name: "Restart to update" })
     ).toBeTruthy();
+  });
+
+  it("offers the download again when Restart to update finds no installer", async () => {
+    const app = fakeApp({ kind: "ready", version: "0.4.3" });
+    app.appUpdate.restartToUpdate.mockImplementationOnce(async () => {
+      // The app moved the offer back before answering.
+      app.send({ kind: "available", version: "0.4.3", failed: true });
+      return { ok: false, code: "not_ready" };
+    });
+    mount();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Restart to update" })
+    );
+    expect(
+      await screen.findByText(
+        "The download of EvoScientist 0.4.3 did not finish."
+      )
+    ).toBeTruthy();
+    await act(() => new Promise((r) => setTimeout(r, 50)));
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "Restart to update" })
+    ).toBeNull();
   });
 
   it("says when a download did not finish", async () => {
