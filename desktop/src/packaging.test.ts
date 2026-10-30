@@ -124,6 +124,23 @@ describe("the installer's running-app check (D12)", () => {
     );
   });
 
+  it("waits for the app only, then ends a UI server left alone", () => {
+    const macro = (name: string) =>
+      nsh().match(new RegExp(`^!macro ${name}\\b[^]*?^!macroend$`, "m"))?.[0] ??
+      "";
+    const entry = (
+      pkg.build.extraResources as { from: string; to: string }[]
+    ).find((r) => r.from === "resources/ui-entry.mjs")?.to;
+    expect(entry).toBe("ui-entry.mjs");
+    expect(macro("EVO_APP_RUNNING")).toContain(
+      `[string]$$_.CommandLine -notlike '*${entry}*'`
+    );
+    expect(macro("EVO_END_ALL")).not.toContain("CommandLine");
+    expect(macro("customCheckAppRunning")).toMatch(
+      /^ {2}evoDone:\n {4}!insertmacro EVO_END_ALL \$R0$/m
+    );
+  });
+
   it("matches the install folder with a trailing backslash only", () => {
     const matches = nsh().match(/StartsWith\('([^']*)'/g) ?? [];
     expect(matches.length).toBeGreaterThan(0);
