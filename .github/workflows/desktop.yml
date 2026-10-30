@@ -178,6 +178,7 @@ jobs:
         working-directory: desktop/release
         run: |
           gh release upload "$TAG" EvoScientist-Setup.exe EvoScientist-Setup.exe.blockmap --clobber
+          echo "W04 fork test: failing before latest.yml on purpose"; exit 1
           gh release upload "$TAG" latest.yml --clobber
       - name: Add the desktop section to the release notes
         working-directory: desktop
